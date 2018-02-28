@@ -16,7 +16,7 @@ import glob
 from scipy.misc import imresize
 import multiprocessing
 
-train_root = '/Users/WY/Downloads/DAVIS17_train_val'
+train_root = '/usr/stud/wangyu/DAVIS17_train_val'
 NUM_PROCESSES = 3
 
 
