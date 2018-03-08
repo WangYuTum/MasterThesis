@@ -1,7 +1,58 @@
-## All trainnig images are resized to 854x480 (only a few). All val/test images remain the same.
-## Means and Stds are computed on tran, val, test-dev, test-challenge sets including 2016 & 2017 datasets
-## Mean R:115.195829334, G:114.927476686, B:107.725750308
-## Std R:64.5572961827, G:63.0172054007, B:67.0494050908
+'''
+    The data pipeline for DAVIS encapsulated as a class object.
 
-## 4209 train frames. 1999 val frames.
-## 2086 test_dev frames. 2180 test_challenge frames.
+    NOTE: the code is still under developing.
+    TODO:
+        * Pipeline for val/test fine-tune/inference
+'''
+
+# NOTE: The .tfrecord files are located on /work/wangyu/ on hpccremers4
+
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
+import tensorflow as tf
+import numpy as np
+from scipy.misc import imsave
+import sys
+import os
+import glob
+from scipy.misc import imsave
+from scipy.misc import toimage
+from scipy.misc import imread
+
+class DAVIS_dataset():
+    def __init__(self, params):
+        '''
+        :param
+            mode: 'parent_train_binary'
+            batch:  2
+            tfrecord: None
+        '''
+
+        # Init params
+        self._mode = params.get('mode', None)
+        self._batch = params.get('batch', 0)
+        self._tfrecord = params.get('tfrecord', None)
+        self._dataset = None
+
+        # params check
+        if self._mode is None:
+            sys.exit("Must specify a mode.")
+        if self._batch == 0:
+            sys.exit("Must specify a batch size.")
+        if self._tfrecord is None:
+            sys.exit("No valid .tfrecord file nor sequence list.")
+
+        # Build up the pipeline
+        if self._mode == 'parent_train_binary':
+            self._dataset = self._build_pipeline()
+        if self._dataset is None:
+            sys.exit("Data pipeline not built.")
+
+    def _build_pipeline(self):
+
+        return None
+
+

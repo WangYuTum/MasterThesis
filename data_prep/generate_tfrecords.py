@@ -12,59 +12,58 @@ import tensorflow as tf
 from PIL import Image
 import sys
 import os
-import glob
 from scipy.misc import imresize
 import multiprocessing
 
 train_root = '/usr/stud/wangyu/DAVIS17_train_val'
+train_list_txt = '../Notebook/train_list.txt'
+train_gt_txt = '../Notebook/train_gt_list.txt'
 NUM_PROCESSES = 3
 
 
-def get_file_list(train_root):
+def get_file_list(train_root, train_list_txt, train_gt_txt):
     '''
         Get all RGB images and corresponding labels
     '''
-    search_train_img = os.path.join(train_root, "JPEGImages", "480p", "*", "*.jpg")
-    search_train_gt = os.path.join(train_root, "Annotations", "480p", "*", "*.png")
-
-    files_train_img = glob.glob(search_train_img)
-    files_train_gt = glob.glob(search_train_gt)
-
-    files_train_img.sort()
-    files_train_gt.sort()
-
-    train_img_len = len(files_train_img)
-    train_img_gt = len(files_train_gt)
-
-    if (train_img_len != train_img_gt):
-        sys.exit('Length of train/val files do not match!')
+    with open(train_list_txt) as t:
+        train_frames = t.read().splitlines()
+    with open(train_gt_txt) as t:
+        gt_frames = t.read().splitlines()
+    if len(train_frames) != len(gt_frames):
+        sys.exit("Train/Gt length do not match!")
     else:
-        print('Got {0} train/gt files.'.format(train_img_len))
+        print("Got {0} train/gt frames.".format(len(train_frames)))
 
-    # Group train/gt pairs
-    train_file_list = []
-    for i in range(train_img_len):
-        train_file_list.append([files_train_img[i], files_train_gt[i]])
+    len_train = len(train_frames)
+    train_pair_list = []
+    for i in range(len_train):
+        file_img = os.path.join(train_root, train_frames[i])
+        file_gt = os.path.join(train_root, gt_frames[i])
+        train_pair_list.append([file_img, file_gt])
 
-    return train_file_list
+    return train_pair_list
 
 
 def load_img(file_pair, scale):
     ''' Input:  a list of length 2: [img_name, gt_name]
         Return: two arrays: [img_arr, gt_arr]
-            img_arr: [480,910,3]
-            gt_arr: [480,910]
+            img_arr: [480,854,3]
+            gt_arr: [480,854]
+        Note: resize to train/gt images to [480,854] first, then rescale
     '''
     img = Image.open(file_pair[0])
-    image = np.array(img, dtype=np.uint8)
+    img_sc = imresize(img, (480, 854))
+    image = np.array(img_sc, dtype=np.uint8)
 
     gt = Image.open(file_pair[1])
     gt_label = np.array(gt, dtype=np.uint8)
     gt_label_bool = np.greater(gt_label, 0)
     gt_label_bin = gt_label_bool.astype(np.uint8)
+    gt_label_bin_sc = imresize(gt_label_bin, (480, 854), interp='nearest')
+    gt_label_bin = np.array(gt_label_bin_sc, dtype=np.uint8)
 
     img_sc = imresize(image, scale)
-    gt_sc = imresize(gt_label_bin, scale)
+    gt_sc = imresize(gt_label_bin, scale, interp='nearest')
     new_img = np.array(img_sc, dtype=np.uint8)
     new_gt = np.array(gt_sc, dtype=np.uint8)
 
@@ -107,7 +106,7 @@ def generate_tfrecords(files_list, record_writer, scale):
     record_writer.close()
 
 def main():
-    train_file_list = get_file_list(train_root)
+    train_file_list = get_file_list(train_root, train_list_txt, train_gt_txt)
     num_processes = NUM_PROCESSES
 
     compression_option = tf.python_io.TFRecordOptions(tf.python_io.TFRecordCompressionType.GZIP)

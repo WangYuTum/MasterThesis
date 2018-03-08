@@ -1,0 +1,20 @@
+Data list description:
+
+* train_list.txt (train_gt_list.txt):
+    A list of all training sequence frames in order, 4209 in total.
+* val_list.txt (val_gt_list.txt):
+    A list of all validation sequence frames in order, 1999 in total.
+* There are also 2086 test_dev frames and 2180 test_challenge frames.
+
+
+TFrecords file description:
+* davis_train_50.tfrecord
+    Dataset containing all training sequence frames/gts. All frames/gts are resize to [480,854], then rescale to 50%
+* davis_train_80.tfrecord
+    Dataset containing all training sequence frames/gts. All frames/gts are resize to [480,854], then rescale to 80%
+* davis_train_100.tfrecord
+    Dataset containing all training sequence frames/gts. All frames/gts are resize to [480,854], then rescale to 100%
+
+Data statistics (computed on all train/val/test-dev/test-challenge frames):
+ * Mean: R:115.195829334, G:114.927476686, B:107.725750308
+ * Std: R:64.5572961827, G:63.0172054007, B:67.0494050908
