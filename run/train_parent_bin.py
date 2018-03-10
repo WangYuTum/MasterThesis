@@ -73,12 +73,25 @@ with tf.Session() as sess:
     iter_80_handle = sess.run(iter_80.string_handle())
     iter_100_handle = sess.run(iter_100.string_handle())
 
-    img_, gt_, sum_all_ = sess.run([dump_img, dump_gt, sum_all], feed_dict={handle: iter_50_handle})
-    sum_writer.add_summary(sum_all_, 0)
-    img_, gt_, sum_all_ = sess.run([dump_img, dump_gt, sum_all], feed_dict={handle: iter_80_handle})
-    sum_writer.add_summary(sum_all_, 1)
-    img_, gt_, sum_all_ = sess.run([dump_img, dump_gt, sum_all], feed_dict={handle: iter_100_handle})
-    sum_writer.add_summary(sum_all_, 2)
+    # each step choose a random scale/dataset for training
+    for step in range(3):
+        rand_v = np.random.rand()
+        train_scale = 0
+        if rand_v <= 0.33:
+            train_scale = 0
+        elif rand_v <= 0.66:
+            train_scale = 1
+        else:
+            train_scale = 2
+
+        if train_scale == 0:
+            feed_dict_v = {handle: iter_50_handle}
+        elif train_scale == 1:
+            feed_dict_v = {handle: iter_80_handle}
+        else:
+            feed_dict_v = {handle: iter_100_handle}
+        img_, gt_, sum_all_ = sess.run([dump_img, dump_gt, sum_all], feed_dict=feed_dict_v)
+        sum_writer.add_summary(sum_all_, step)
 
 
 
