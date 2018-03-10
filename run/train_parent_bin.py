@@ -6,11 +6,11 @@ import os,sys
 import numpy as np
 import tensorflow as tf
 sys.path.append("..")
-import dataset as dt
+from dataset import DAVIS_dataset
 # from core import resnet38
 
 # config device
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = ''
 config_gpu = tf.ConfigProto()
 config_gpu.gpu_options.per_process_gpu_memory_fraction = 0.5
 
@@ -31,9 +31,9 @@ params_data100 = {
     'tfrecord': '/work/wangyu/davis_train_100.tfrecord'
 }
 with tf.device('/cpu:0'):
-    dataset_50 = dt(params_data50)
-    dataset_80 = dt(params_data80)
-    dataset_100 = dt(params_data100)
+    dataset_50 = DAVIS_dataset(params_data50)
+    dataset_80 = DAVIS_dataset(params_data80)
+    dataset_100 = DAVIS_dataset(params_data100)
     iter_50 = dataset_50.get_iterator()
     iter_80 = dataset_80.get_iterator()
     iter_100 = dataset_100.get_iterator()
@@ -58,15 +58,16 @@ dump_img = next_batch['img']
 dump_gt = next_batch['gt']
 
 sum_img = tf.summary.image('input_img', dump_img)
-sum_gt = tf.summary.image('input_gt', dump_gt)
+sum_gt = tf.summary.image('input_gt', tf.cast(dump_gt,tf.float16))
 sum_all = tf.summary.merge_all()
 
 # TODO: Build network, on GPU by default
 init_op = tf.global_variables_initializer()
 
 # run the session
-with tf.Session(config=config_gpu) as sess:
-    sum_writer = tf.summary.Filewriter(params_model['tsboard_logs'], sess.graph)
+# with tf.Session(config=config_gpu) as sess:
+with tf.Session() as sess:
+    sum_writer = tf.summary.FileWriter(params_model['tsboard_logs'], sess.graph)
     sess.run(init_op)
     iter_50_handle = sess.run(iter_50.string_handle())
     iter_80_handle = sess.run(iter_80.string_handle())

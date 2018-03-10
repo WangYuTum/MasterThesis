@@ -48,7 +48,7 @@ class DAVIS_dataset():
         if self._tfrecord is None:
             sys.exit("No valid .tfrecord file nor sequence list.")
         else:
-            self._scale = int(self._tfrecord.split("_")[2])
+            self._scale = int(self._tfrecord.split("_")[2].split(".")[0])
 
         # Build up the pipeline
         if self._mode == 'parent_train_binary':

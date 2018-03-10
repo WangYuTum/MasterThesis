@@ -4,6 +4,12 @@
 # Python Notebook
 Notebook/.ipynb_checkpoints/
 
+# data
+data/
+
+# .pyc
+*.pyc
+
 # .idea
 .idea/
 
