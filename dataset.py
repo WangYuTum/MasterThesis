@@ -2,8 +2,12 @@
     The data pipeline for DAVIS encapsulated as a class object.
 
     NOTE: the code is still under developing.
+
+    DONE:
+        * Pipeline for training parent network using binary mask
+        * Pipeline for fine-tuning/inference parent network using binary mask
     TODO:
-        * Pipeline for val/test fine-tune/inference
+        * Pipeline for val/test fine-tune/inference on multi-object mask
 '''
 
 # NOTE: The .tfrecord files are located on /work/wangyu/ on hpccremers4
@@ -15,6 +19,7 @@ from __future__ import print_function
 import tensorflow as tf
 import numpy as np
 from scipy.misc import imsave
+from PIL import Image
 import sys
 import os
 import glob
@@ -26,7 +31,9 @@ class DAVIS_dataset():
     def __init__(self, params):
         '''
         :param params(dict) keys:
-            mode: 'parent_train_binary'
+            mode: 'parent_train_binary'-train network with independent frames
+                  'parent_finetune_binary'-finetune network with 1st annotation of the seq
+            seq_path: only used in mode 'parent_finetune_binary', e.g. 'DAVIS_root/JPEGImages/480p/bike-packing'
             batch:  2
             tfrecord: None
         '''
@@ -35,26 +42,40 @@ class DAVIS_dataset():
         self._mode = params.get('mode', None)
         self._batch = int(params.get('batch', 0))
         self._tfrecord = params.get('tfrecord', None)
-        self._dataset = None
+        self._seq_path = params.get('seq_path', None)
+        self._dataset = None # only used in mode 'parent_train_binary'
         self._scale = 100 # in percentage
         self._map_threads = self._batch * 2
         self._map_buffer = self._batch * 4
+        self._seq = None # only used in mode 'parent_finetune_binary'
+        self._data_mean = np.array([115.195829334, 114.927476686, 107.725750308]).reshape((1,1,3))
+        self._data_std = np.array([64.5572961827, 63.0172054007, 67.0494050908]).reshape((1,1,3))
 
         # params check
         if self._mode is None:
             sys.exit("Must specify a mode.")
-        if self._batch == 0:
-            sys.exit("Must specify a batch size.")
-        if self._tfrecord is None:
-            sys.exit("No valid .tfrecord file nor sequence list.")
-        else:
-            self._scale = int(self._tfrecord.split("_")[2].split(".")[0])
+        if self._mode == 'parent_finetune_binary':
+            if self._seq_path is None:
+                sys.exit("Must specify a seq_path in mode {}".format(self._mode))
+        if self._mode == 'parent_train_binary' and self._batch == 0:
+            sys.exit("Must specify a batch size in mode {}".format(self._mode))
+        if self._mode == 'parent_train_binary':
+            if self._tfrecord is None:
+                sys.exit("Must specify a path to .tfrecord file in mode {}".format(self._mode))
+            else:
+                self._scale = int(self._tfrecord.split("_")[2].split(".")[0])
 
         # Build up the pipeline
         if self._mode == 'parent_train_binary':
             self._dataset = self._build_pipeline()
-        if self._dataset is None:
-            sys.exit("Data pipeline not built.")
+        elif self._mode == 'parent_finetune_binary':
+            self._seq = self._get_seq_frames()
+        else:
+            sys.exit("Not supported mode.")
+        if self._mode == 'parent_train_binary' and self._dataset is None:
+            sys.exit("Data pipeline not built in mode {}".format(self._mode))
+        if self._mode == 'parent_finetune_binary' and self._seq is None:
+            sys.exit("Seq {0} data not restored in mode {1}".format(self._seq_path, self._mode))
 
     def _parse_single_record(self, record):
         '''
@@ -87,13 +108,9 @@ class DAVIS_dataset():
         :param example: parsed record - a dict
         :return: a dict where RGB image is standardized
         '''
-
-        mean = np.array([115.195829334, 114.927476686, 107.725750308]).reshape((1,1,3))
-        std = np.array([64.5572961827, 63.0172054007, 67.0494050908]).reshape((1,1,3))
-
         rgb_img = example['img']
-        rgb_img -= mean
-        rgb_img /= std
+        rgb_img -= self._data_mean
+        rgb_img /= self._data_std
 
         # Pack the result
         tranformed = {}
@@ -157,13 +174,51 @@ class DAVIS_dataset():
 
         return iter
 
-    def next_batch(self):
+    ## The following functions are not using .tfrecord.
+    ## They are mainly used on seq-by-seq train/fine-tune.
+    ## The data are read from disk and stored in main memory for the whole life of the model.
 
-        batch_iterator = self._dataset.make_one_shot_iterator()
-        next_batch = batch_iterator.get_next()
+    def _get_seq_frames(self):
+        '''
+        Example self._seq_path: 'DAVIS_root/JPEGImages/480p/bike-packing'
+        :return: A list of numpy image arrays
 
-        return next_batch
+        NOTE: the returned frames are standardized
+        '''
+        seq_frames = []
+        search_seq_imgs = os.path.join(self._seq_path, "*.jpg")
+        files_seq = glob.glob(search_seq_imgs)
+        files_seq.sort()
+        num_frames = len(files_seq)
+        if num_frames == 0:
+            sys.exit("Got no frames for seq {}".format(self._seq_path))
+        for i in range(num_frames):
+            frame = np.array(Image.open(files_seq[i])).astype(np.float32)
+            # stardardize
+            frame -= self._data_mean
+            frame /= self._data_std
+            seq_frames.append(frame)
 
+        return seq_frames
+
+    def get_one_shot_pair(self):
+        '''
+        :return: [img, gt] for the one-shot fine-tuning of the self._seq
+        '''
+        pair = []
+        pair.append(self._seq[0])
+
+        gt_path = os.path.join(self._seq_path.replace('JPEGImages','Annotations'), '00000.png')
+        gt = np.array(Image.open(gt_path)).astype(np.int32)
+        pair.append(gt)
+
+        return pair
+
+    def get_test_frames(self):
+
+        frame_list = self._seq[1:]
+
+        return frame_list
 
 
 
