@@ -19,9 +19,9 @@ def conv_layer(data_format, input_tensor, stride=1, padding='SAME', shape=None):
     kernel = create_conv_kernel(shape)
 
     if data_format == "NCHW":
-        conv_stride = [1,1,stride,stride]
+        conv_stride = [1, 1, stride, stride]
     else:
-        conv_stride = [1,stride,stride,1]
+        conv_stride = [1, stride, stride, 1]
     conv_out = tf.nn.conv2d(input_tensor, kernel, strides=conv_stride, padding=padding, data_format=data_format)
 
     return conv_out
@@ -31,25 +31,25 @@ def res_side(data_format, input_tensor, shape_dict, is_train=False):
     ''' The residual block unit with side conv '''
 
     # The 1st bn layer
-    BN_out1 = BN(data_format, input_tensor, 'bn1', shape_dict['convs'][0][2], is_train)
-    RELU_out1 = ReLu_layer(BN_out1)
+    bn_out1 = BN(data_format, input_tensor, 'bn1', shape_dict['convs'][0][2], is_train)
+    relu_out1 = ReLu_layer(bn_out1)
 
     # The side conv
     with tf.variable_scope('side'):
-        side_out = conv_layer(data_format, RELU_out1, 1, 'SAME', shape_dict['side'])
+        side_out = conv_layer(data_format, relu_out1, 1, 'SAME', shape_dict['side'])
     # The 1st conv
     with tf.variable_scope('conv1'):
-        CONV_out1 = conv_layer(data_format, RELU_out1, 1, 'SAME', shape_dict['convs'][0])
+        conv_out1 = conv_layer(data_format, relu_out1, 1, 'SAME', shape_dict['convs'][0])
     # The 2nd bn layer
-    BN_out2 = BN(data_format, CONV_out1, 'bn2', shape_dict['convs'][1][2], is_train)
-    RELU_out2 = ReLu_layer(BN_out2)
+    bn_out2 = BN(data_format, conv_out1, 'bn2', shape_dict['convs'][1][2], is_train)
+    relu_out2 = ReLu_layer(bn_out2)
     # The 2nd conv layer
     with tf.variable_scope('conv2'):
-        CONV_out2 = conv_layer(data_format, RELU_out2, 1, 'SAME', shape_dict['convs'][1])
+        conv_out2 = conv_layer(data_format, relu_out2, 1, 'SAME', shape_dict['convs'][1])
     # Fuse
-    RES_out = tf.add(side_out, CONV_out2)
+    block_out = tf.add(side_out, conv_out2)
 
-    return  RES_out
+    return  block_out
 
 
 def res(data_format, input_tensor, shape_dict, is_train=False):
@@ -64,21 +64,21 @@ def res(data_format, input_tensor, shape_dict, is_train=False):
         shape_conv2 = shape_dict[1]
 
     # The 1st bn layer
-    BN_out1 = BN(data_format, input_tensor, 'bn1', shape_conv1[2], is_train)
-    RELU_out1 = ReLu_layer(BN_out1)
+    bn_out1 = BN(data_format, input_tensor, 'bn1', shape_conv1[2], is_train)
+    relu_out1 = ReLu_layer(bn_out1)
     # The 1st conv layer
     with tf.variable_scope('conv1'):
-        CONV_out1 = conv_layer(data_format, RELU_out1, 1, 'SAME', shape_conv1)
+        conv_out1 = conv_layer(data_format, relu_out1, 1, 'SAME', shape_conv1)
     # The 2nd bn layer
-    BN_out2 = BN(data_format, CONV_out1, 'bn2', shape_conv2[2], is_train)
-    RELU_out2 = ReLu_layer(BN_out2)
+    bn_out2 = BN(data_format, conv_out1, 'bn2', shape_conv2[2], is_train)
+    relu_out2 = ReLu_layer(bn_out2)
     # The 2nd conv layer
     with tf.variable_scope('conv2'):
-        CONV_out2 = conv_layer(data_format, RELU_out2, 1, 'SAME', shape_conv2)
+        conv_out2 = conv_layer(data_format, relu_out2, 1, 'SAME', shape_conv2)
     # Fuse
-    RES_out = tf.add(input_tensor, CONV_out2)
+    block_out = tf.add(input_tensor, conv_out2)
 
-    return RES_out
+    return block_out
 
 
 def create_conv_kernel(shape=None):
@@ -97,11 +97,11 @@ def max_pool2d(data_format, input_tensor, stride=2, padding='SAME'):
     ''' The standard max_pool2d with kernel size 2x2 '''
 
     if data_format == "NCHW":
-        pool_size = [1,1,2,2]
-        pool_stride = [1,1,stride,stride]
+        pool_size = [1, 1, 2, 2]
+        pool_stride = [1, 1, stride, stride]
     else:
-        pool_size = [1,2,2,1]
-        pool_stride = [1,2,2,1]
+        pool_size = [1, 2, 2, 1]
+        pool_stride = [1, 2, 2, 1]
 
     out = tf.nn.max_pool(input_tensor, pool_size, pool_stride, padding, data_format)
 
@@ -125,12 +125,12 @@ def BN(data_format, input_tensor, bn_scope=None, shape=None, is_train=False):
         bn_fused = False
 
     if data_format == "NCHW":
-        norm_axis=1
+        norm_axis = 1
     else:
-        norm_axis=-1
+        norm_axis = -1
 
     # TODO: check if tf.train.Saver restore variables of bn layer
-    BN_out = tf.layers.batch_normalization(inputs=input_tensor,
+    bn_out = tf.layers.batch_normalization(inputs=input_tensor,
                                            axis=norm_axis,
                                            momentum=0.99,
                                            epsilon=0.001,
@@ -146,10 +146,9 @@ def BN(data_format, input_tensor, bn_scope=None, shape=None, is_train=False):
                                            trainable=bn_trainable,
                                            name=bn_scope,
                                            reuse=None,
-                                           fused=bn_fused
-                                           )
+                                           fused=bn_fused)
 
-    return BN_out
+    return bn_out
 
 
 def get_bn_params():
@@ -185,6 +184,7 @@ def upsample_filt(size):
     else:
         center = factor - 0.5
     og = np.ogrid[:size, :size]
+
     return (1 - abs(og[0] - center) / factor) * \
            (1 - abs(og[1] - center) / factor)
 
@@ -255,6 +255,20 @@ def crop_features(data_format, feature, out_size):
         ini_w = tf.div(tf.subtract(up_size[2], out_size[2]), 2)  # might be zero
         slice_input = tf.slice(feature, (0, ini_h, ini_w, 0), (-1, out_size[1], out_size[2], -1))
         return tf.reshape(slice_input, [int(feature.get_shape()[0]), out_size[1], out_size[2], int(feature.get_shape()[3])])
+
+def bias_layer(data_format, input_tensor, shape=None):
+
+    bias = create_bias(shape)
+    bias_out = tf.nn.bias_add(input_tensor, bias, data_format)
+
+def create_bias(shape=None):
+
+    init = tf.zeros_initializer()
+    var = tf.get_variable('bias', initializer=init, shape=shape)
+
+    return var
+
+
 
 
 

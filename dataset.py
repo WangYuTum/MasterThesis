@@ -128,16 +128,30 @@ class DAVIS_dataset():
             - Randomly flip img/gt together
         '''
 
+        # get weight matrix for balanced_cross_entropy loss
+        num_pos = tf.reduce_sum(example['gt'])
+        num_neg = tf.reduce_sum(1-example['gt'])
+        num_total = num_pos + num_neg
+
+        weight_pos = tf.cast(num_neg, tf.float32) / tf.cast(num_total, tf.float32)
+        weight_neg = 1.0 - weight_pos
+
+        mat_pos = tf.multiply(tf.cast(example['gt'], tf.float32), weight_pos)
+        mat_neg = tf.multiply( tf.cast(1-example['gt'], tf.float32), weight_neg)
+        mat_weight = tf.add(mat_pos, mat_neg)
+
         gt = tf.cast(example['gt'], tf.float32)
-        stacked = tf.concat([example['img'], gt], axis=-1) # shape: [H, W, 4]
+        stacked = tf.concat([example['img'], gt, mat_weight], axis=-1) # shape: [H, W, 5]
         stacked = tf.image.random_flip_left_right(stacked)
 
         # Pack the result
         image = stacked[:,:,0:3]
         gt = tf.cast(stacked[:,:,3:4], tf.int32)
+        balanced_mat = stacked[:,:,4:5]
         transformed = {}
         transformed['img'] = image
         transformed['gt'] = gt
+        transformed['balanced_mat'] = balanced_mat
 
         return  transformed
 

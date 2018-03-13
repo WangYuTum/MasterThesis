@@ -3,12 +3,12 @@
 
     NOTE: the code is still under developing.
     TODO:
-        ** padding in deconv layer ??? SAME-osvos, VALID-online_tutorial
-        ** bias layers ??? must add on side path. on backbone net?
-        ** side supervision loss. read InceptionNet
-        * load pre-trained ImageNet ckpt. Pay attention to RGB means.
-        * Saver for save/restore weights. Check for each layer whether first created or restored.
+        ** padding in deconv layer: used SAME-osvos. consider VALID suggested from online_tutorial ?
+        ** bias layers: added on side path. on backbone net?
+        ** load pre-trained ImageNet ckpt. Pay attention to RGB means.
+        **** Saver for save/restore weights. Check for each layer whether first created or restored.
         * Learning rate scheduler
+        * side supervision loss. read InceptionNet
         * Apply diff lr for diff layers
         * Estimator ...
 '''
@@ -31,11 +31,11 @@ class ResNet():
             data_format: either "NCHW" or "NHWC"
         '''
 
-        self._feed_ckpt = params.get('feed_ckpt', None)
         self._data_format = params.get('data_format', None)
+        self._batch = params.get('batch', 2)
+        self._l2_weight = params.get('l2_weight', 0.0002)
+        self._init_lr = params.get('init_lr', 1e-8)
 
-        if self._feed_ckpt is None:
-            sys.exit("Invalid feed .ckpt")
         if self._data_format is not "NCHW" and self._data_format is not "NHWC":
             sys.exit("Invalid data format. Must be either 'NCHW' or 'NHWC'.")
 
@@ -122,18 +122,22 @@ class ResNet():
             im_size = tf.shape(images)
             with tf.variable_scope('B1_side_path'):
                 side_2 = nn.conv_layer(self._data_format, model['B1_2'], 1, 'SAME', [3, 3, 128, 16])
+                side_2 = nn.bias_layer(self._data_format, side_2, [16])
                 side_2_f = nn.conv_transpose(self._data_format, side_2, 2, 'SAME')
                 side_2_f = nn.crop_features(self._data_format, side_2_f, im_size)
             with tf.variable_scope('B2_side_path'):
                 side_4 = nn.conv_layer(self._data_format, model['B2_2'], 1, 'SAME', [3, 3, 256, 16])
+                side_4 = nn.bias_layer(self._data_format, side_4, 16)
                 side_4_f = nn.conv_transpose(self._data_format, side_4, 4, 'SAME')
                 side_4_f = nn.crop_features(self._data_format, side_4_f, im_size)
             with tf.variable_scope('B3_side_path'):
                 side_8 = nn.conv_layer(self._data_format, model['B3_5'], 1, 'SAME', [3, 3, 512, 16])
+                side_8 = nn.bias_layer(self._data_format, side_8, 16)
                 side_8_f = nn.conv_transpose(self._data_format, side_8, 8, 'SAME')
                 side_8_f = nn.crop_features(self._data_format, side_8_f, im_size)
             with tf.variable_scope('B4_side_path'):
                 side_16 = nn.conv_layer(self._data_format, model['B4_2'], 1, 'SAME', [3, 3, 1024, 16])
+                side_16 = nn.bias_layer(self._data_format, side_16, 16)
                 side_16_f = nn.conv_transpose(self._data_format, side_16, 16, 'SAME')
                 side_16_f = nn.crop_features(self._data_format, side_16_f, im_size)
 
@@ -143,16 +147,103 @@ class ResNet():
             else:
                 concat_side = tf.concat([side_2_f, side_4_f, side_8_f, side_16_f], axis=3)
             with tf.variable_scope('fuse'):
-                net_out = nn.conv_layer(self._data_format, concat_side, 1, 'SAME', [1, 1, 64, 1])
+                net_out = nn.conv_layer(self._data_format, concat_side, 1, 'SAME', [1, 1, 64, 2])
+                net_out = nn.bias_layer(self._data_format, net_out, 2)
 
         return net_out
 
-    def train(self, images, gts, params):
+    def train(self, images, gts, weight):
+        '''
+        :param images: batch of images have shape [batch, H, W, 3] where H, W depend on the scale of dataset
+        :param gts: batch of gts have shape [batch, H, W, 1]
+        :param weight: batch of balanced weights have shape [batch, H, W, 1]
+        :return: a tf.Tensor scalar, a train op
+        '''
+
+        net_out = self._build_model(images, True) # [N, C, H, W] or [N, H, W, C]
+        total_loss = self._balanced_cross_entropy(net_out, gts, weight) + self._l2_weight()
+        tf.summary.scalar('total_loss', total_loss)
+
+        update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+        with tf.control_dependencies(update_ops):
+            train_step = tf.train.AdamOptimizer(self._init_lr).minimize(total_loss)
+        print("Model built.")
+
+        return total_loss, train_step
+
+    def test(self, images):
+        '''
+        :param images: batchs/single image have shape [batch, H, W, 3]
+        :return: probability map, binary mask
+        '''
+        net_out = self._build_model(images, False) # [batch, 2, H, W] or [batch, H, W, 2]
+        if self._data_format == "NCHW":
+            net_out = tf.transpose(net_out, [0, 2, 3, 1])
+        prob_map = tf.nn.softmax(net_out) # [batch, H, W, 2]
+        pred_mask = tf.argmax(tf.nn.softmax(prob_map), axis=3) # [batch, H, W]
+
+        return prob_map, pred_mask
+
+    def _balanced_cross_entropy(self, input_tensor, labels, weight):
+        '''
+        :param input_tensor: the output of final layer, must have shape [batch, C, H, W] or [batch, H, W, C], tf.float32
+        :param labels: the gt binary labels, have the shape [batch, H, W, C], tf.int32
+        :param img_size: python list [H, W]
+        :param weight: shape [H, W, 1]
+        :return: balanced cross entropy loss, a scalar, tf.float32
+        '''
+
+        if self._data_format == "NCHW":
+            input_tensor = tf.transpose(input_tensor, [0, 2, 3, 1]) # to NHWC
+        # Flatten the tensor using convolution
+        feed_logits = self._flatten_logits(input_tensor) # [N, H*W, 2]
+        feed_labels = self._flatten_labels(labels) # [N, H*W]
+        feed_weight = self._flatten_labels(weight) # [N, H*W]
+
+        cross_loss = tf.nn.softmax_cross_entropy_with_logits(labels=feed_labels, logits=feed_logits)
+        balanced_loss = tf.multiply(cross_loss, feed_weight)
+
+        return tf.reduce_mean(balanced_loss)
+
+    def _l2_loss(self):
+
+        l2_losses = []
+        for var in tf.trainable_variables():
+            l2_losses.append(tf.nn.l2_loss(var))
+
+        return tf.multiply(self._l2_weight, tf.add_n(l2_losses))
+
+    def  _flatten_logits(self, input_tensor):
+        '''
+        :param input_tensor: Must have shape [N, H, W, 2]
+        :return: the same tensor with shape [N, H*W, 2]
+        '''
+        kernel = tf.Variable([[[[1, 0], [0, 1]]]], dtype=tf.float32, trainable=False, name='flatten_logits_kernel')
+        flatten_out = tf.nn.conv2d(input_tensor, kernel, strides=[1, 1, 1, 1], padding='VALID', data_format="NHWC")
+
+        return flatten_out
+
+    def _flatten_labels(self, input_tensor):
+        '''
+        :param input_tensor: labels/weights have shape [N, H, W, 1]
+        :return: flattened tensor with shape [N, H*W]
+        '''
+
+        kernel = tf.Variable([[[[1]]]], dtype=tf.float32, trainable=False, name='flatten_label_kernel')
+        flatten_out = tf.nn.conv2d(input_tensor, kernel, strides=[1,1,1,1], padding='VALID', data_format="NHWC")
+
+        return flatten_out
 
 
-        total_loss = None
 
-        return total_loss
+
+
+
+
+
+
+
+
 
 
 
