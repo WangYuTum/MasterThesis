@@ -110,6 +110,9 @@ def max_pool2d(data_format, input_tensor, stride=2, padding='SAME'):
 
 def BN(data_format, input_tensor, bn_scope=None, shape=None, is_train=False):
 
+    scope_name = tf.get_variable_scope().name + '/' + bn_scope
+    print('Layer name: %s'%scope_name)
+
     [beta_init, gamma_init, mean_init, var_init] = get_bn_params()
     bn_training = is_train
     bn_trainable = True
@@ -154,6 +157,7 @@ def BN(data_format, input_tensor, bn_scope=None, shape=None, is_train=False):
 def get_bn_params():
     # When first initialized/created use zero/one init, otherwise restore from .ckpt
     # TODO: check if first created or restored
+
     init_beta = tf.zeros_initializer()
     init_mean = tf.zeros_initializer()
     init_gamma = tf.ones_initializer()
@@ -219,13 +223,15 @@ def conv_transpose(data_format, input_tensor, factor=0, padding='SAME'):
                                   initializer = tf.zeros_initializer(),
                                   trainable = False)
     if data_format == "NCHW":
-        out_channels = tf.shape(input_tensor)[1]
-        new_H = tf.shape(input_tensor)[2]
-        new_W = tf.shape(input_tensor)[3]
+        # out_channels = tf.shape(input_tensor)[1]
+        out_channels = 16
+        new_H = tf.shape(input_tensor)[2] * factor
+        new_W = tf.shape(input_tensor)[3] * factor
         trans_output_shape = [batch_size, out_channels, new_H, new_W]
         trans_stride = [1, 1, factor, factor]
     else:
-        out_channels = tf.shape(input_tensor)[3]
+        # out_channels = tf.shape(input_tensor)[3]
+        out_channels = 16
         new_H = tf.shape(input_tensor)[1]
         new_W = tf.shape(input_tensor)[2]
         trans_output_shape = [batch_size, new_H, new_W, out_channels]
@@ -249,17 +255,19 @@ def crop_features(data_format, feature, out_size):
         ini_h = tf.div(tf.subtract(up_size[2], out_size[2]), 2) # might be zero
         ini_w = tf.div(tf.subtract(up_size[3], out_size[3]), 2) # might be zero
         slice_input = tf.slice(feature, (0, 0, ini_h, ini_w), (-1, -1, out_size[2], out_size[3]))
-        return tf.reshape(slice_input, [int(feature.get_shape()[0]), int(feature.get_shape()[1]), out_size[2], out_size[3]])
+        return tf.reshape(slice_input, [up_size[0], up_size[1], out_size[2], out_size[3]])
     else:
         ini_h = tf.div(tf.subtract(up_size[1], out_size[1]), 2)  # might be zero
         ini_w = tf.div(tf.subtract(up_size[2], out_size[2]), 2)  # might be zero
         slice_input = tf.slice(feature, (0, ini_h, ini_w, 0), (-1, out_size[1], out_size[2], -1))
-        return tf.reshape(slice_input, [int(feature.get_shape()[0]), out_size[1], out_size[2], int(feature.get_shape()[3])])
+        return tf.reshape(slice_input, [up_size[0], out_size[1], out_size[2], up_size[3]])
 
 def bias_layer(data_format, input_tensor, shape=None):
 
     bias = create_bias(shape)
     bias_out = tf.nn.bias_add(input_tensor, bias, data_format)
+
+    return bias_out
 
 def create_bias(shape=None):
 
@@ -267,6 +275,60 @@ def create_bias(shape=None):
     var = tf.get_variable('bias', initializer=init, shape=shape)
 
     return var
+
+
+def get_imgnet_var():
+
+    ## Imgnet weights variables
+    imgnet_dict = {}
+    # for the first conv
+    with tf.variable_scope('main/B0', reuse=True):
+        imgnet_dict['main/B0/kernel'] = tf.get_variable('kernel')
+    # for all resnet side convs
+    for i in range(4):
+        with tf.variable_scope('main/B' + str(i + 1) + '_0/side', reuse=True):
+            imgnet_dict['main/B' + str(i + 1) + '_0/side/kernel'] = tf.get_variable('kernel')
+    # for all convs on the main path
+    for i in range(4):
+        for j in range(3):
+            with tf.variable_scope('main/B' + str(i + 1) + '_' + str(j) + '/conv1', reuse=True):
+                imgnet_dict['main/B' + str(i + 1) + '_' + str(j) + '/conv1/kernel'] = tf.get_variable('kernel')
+            with tf.variable_scope('main/B' + str(i + 1) + '_' + str(j) + '/conv2', reuse=True):
+                imgnet_dict['main/B' + str(i + 1) + '_' + str(j) + '/conv2/kernel'] = tf.get_variable('kernel')
+    # for convs on B3_3, B3_4, B3_5
+    for i in range(3):
+        with tf.variable_scope('main/B3_' + str(i + 3) + '/conv1', reuse=True):
+            imgnet_dict['main/B3_' + str(i + 3) + '/conv1/kernel'] = tf.get_variable('kernel')
+        with tf.variable_scope('main/B3_' + str(i + 3) + '/conv2', reuse=True):
+            imgnet_dict['main/B3_' + str(i + 3) + '/conv2/kernel'] = tf.get_variable('kernel')
+    # for all batchnorm layers
+    for i in range(4):
+        for j in range(3):
+            with tf.variable_scope('main/B' + str(i + 1) + '_' + str(j) + '/bn1', reuse=True):
+                imgnet_dict['main/B' + str(i + 1) + '_' + str(j) + '/bn1/beta'] = tf.get_variable('beta')
+                imgnet_dict['main/B' + str(i + 1) + '_' + str(j) + '/bn1/gamma'] = tf.get_variable('gamma')
+                imgnet_dict['main/B' + str(i + 1) + '_' + str(j) + '/bn1/moving_mean'] = tf.get_variable('moving_mean')
+                imgnet_dict['main/B' + str(i + 1) + '_' + str(j) + '/bn1/moving_variance'] = tf.get_variable('moving_variance')
+            with tf.variable_scope('main/B' + str(i + 1) + '_' + str(j) +  '/bn2', reuse=True):
+                imgnet_dict['main/B' + str(i + 1) + '_' + str(j) + '/bn2/beta'] = tf.get_variable('beta')
+                imgnet_dict['main/B' + str(i + 1) + '_' + str(j) + '/bn2/gamma'] = tf.get_variable('gamma')
+                imgnet_dict['main/B' + str(i + 1) + '_' + str(j) + '/bn2/moving_mean'] = tf.get_variable('moving_mean')
+                imgnet_dict['main/B' + str(i + 1) + '_' + str(j) + '/bn2/moving_variance'] = tf.get_variable('moving_variance')
+    # for batchnorm on B3_3, B3_4, B3_5
+    for i in range(3):
+        with tf.variable_scope('main/B3_' + str(i + 3) + '/bn1', reuse=True):
+            imgnet_dict['main/B3_' + str(i + 3) + '/bn1/beta'] = tf.get_variable('beta')
+            imgnet_dict['main/B3_' + str(i + 3) + '/bn1/gamma'] = tf.get_variable('gamma')
+            imgnet_dict['main/B3_' + str(i + 3) + '/bn1/moving_mean'] = tf.get_variable('moving_mean')
+            imgnet_dict['main/B3_' + str(i + 3) + '/bn1/moving_variance'] = tf.get_variable('moving_variance')
+        with tf.variable_scope('main/B3_' + str(i + 3) + '/bn2', reuse=True):
+            imgnet_dict['main/B3_' + str(i + 3) + '/bn2/beta'] = tf.get_variable('beta')
+            imgnet_dict['main/B3_' + str(i + 3) + '/bn2/gamma'] = tf.get_variable('gamma')
+            imgnet_dict['main/B3_' + str(i + 3) + '/bn2/moving_mean'] = tf.get_variable('moving_mean')
+            imgnet_dict['main/B3_' + str(i + 3) + '/bn2/moving_variance'] = tf.get_variable('moving_variance')
+
+    return imgnet_dict
+
 
 
 

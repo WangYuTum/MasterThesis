@@ -5,8 +5,8 @@
     TODO:
         ** padding in deconv layer: used SAME-osvos. consider VALID suggested from online_tutorial ?
         ** bias layers: added on side path. on backbone net?
-        ** load pre-trained ImageNet ckpt. Pay attention to RGB means.
-        **** Saver for save/restore weights. Check for each layer whether first created or restored.
+        ** load pre-trained ImageNet ckpt. In RGB order
+        **** Saver for save/restore weights. Check for the saved weights
         * Learning rate scheduler
         * side supervision loss. read InceptionNet
         * Apply diff lr for diff layers
@@ -95,7 +95,7 @@ class ResNet():
             # Residual Block B3_0 - B3_5
             shape_dict['B3'] = {}
             shape_dict['B3']['side'] = [1, 1, 256, 512]
-            shape_dict['B3']['convs'] = [[3, 3, 512, 512], [3, 3, 512, 512]]
+            shape_dict['B3']['convs'] = [[3, 3, 256, 512], [3, 3, 512, 512]]
             with tf.variable_scope('B3_0'):
                 model['B3_0'] = nn.res_side(self._data_format, model['B2_2_pooled'], shape_dict['B3'], is_train)
             for i in range(5):
@@ -161,8 +161,16 @@ class ResNet():
         '''
 
         net_out = self._build_model(images, True) # [N, C, H, W] or [N, H, W, C]
-        total_loss = self._balanced_cross_entropy(net_out, gts, weight) + self._l2_weight()
+        total_loss = self._balanced_cross_entropy(net_out, gts, weight) + self._l2_loss()
         tf.summary.scalar('total_loss', total_loss)
+
+        # display current predict
+        if self._data_format == "NCHW":
+            pred_out = tf.transpose(net_out, [0, 2, 3, 1])
+        # pred_out = tf.argmax(tf.nn.softmax(pred_out), axis=3) # [batch, H, W]
+        # pred_out = tf.expand_dims(pred_out, -1) # [batch, H, W, 1]
+        pred_out = pred_out[:,:,:,1:2]
+        tf.summary.image('pred', tf.cast(pred_out, tf.float16))
 
         update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
         with tf.control_dependencies(update_ops):
@@ -189,18 +197,22 @@ class ResNet():
         :param input_tensor: the output of final layer, must have shape [batch, C, H, W] or [batch, H, W, C], tf.float32
         :param labels: the gt binary labels, have the shape [batch, H, W, C], tf.int32
         :param img_size: python list [H, W]
-        :param weight: shape [H, W, 1]
+        :param weight: shape [H, W, 1], tf.float32
         :return: balanced cross entropy loss, a scalar, tf.float32
         '''
 
         if self._data_format == "NCHW":
             input_tensor = tf.transpose(input_tensor, [0, 2, 3, 1]) # to NHWC
         # Flatten the tensor using convolution
-        feed_logits = self._flatten_logits(input_tensor) # [N, H*W, 2]
-        feed_labels = self._flatten_labels(labels) # [N, H*W]
-        feed_weight = self._flatten_labels(weight) # [N, H*W]
+        input_shape = tf.shape(input_tensor)
+        feed_logits = tf.reshape(input_tensor, [input_shape[0], input_shape[1]*input_shape[2], input_shape[3]])
+        feed_labels = tf.reshape(labels, [input_shape[0], input_shape[1]*input_shape[2]])
+        feed_weight = tf.reshape(weight, [input_shape[0], input_shape[1] * input_shape[2]])
+        # feed_logits = self._flatten_logits(input_tensor) # [N, H*W, 2]
+        # feed_labels = self._flatten_labels(labels, 'tf.int32') # [N, H*W]
+        # feed_weight = self._flatten_labels(weight, 'tf.float32') # [N, H*W]
 
-        cross_loss = tf.nn.softmax_cross_entropy_with_logits(labels=feed_labels, logits=feed_logits)
+        cross_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=feed_labels, logits=feed_logits)
         balanced_loss = tf.multiply(cross_loss, feed_weight)
 
         return tf.reduce_mean(balanced_loss)
@@ -223,14 +235,17 @@ class ResNet():
 
         return flatten_out
 
-    def _flatten_labels(self, input_tensor):
+    def _flatten_labels(self, input_tensor, dtype):
         '''
         :param input_tensor: labels/weights have shape [N, H, W, 1]
         :return: flattened tensor with shape [N, H*W]
         '''
-
+        if dtype == "tf.int32":
+            input_tensor = tf.cast(input_tensor, tf.float32)
         kernel = tf.Variable([[[[1]]]], dtype=tf.float32, trainable=False, name='flatten_label_kernel')
         flatten_out = tf.nn.conv2d(input_tensor, kernel, strides=[1,1,1,1], padding='VALID', data_format="NHWC")
+        if dtype == "tf.int32":
+            flatten_out = tf.cast(flatten_out, tf.int32)
 
         return flatten_out
 

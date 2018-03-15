@@ -9,6 +9,7 @@ sys.path.append("..")
 from dataset import DAVIS_dataset
 from core import resnet
 from core.nn import set_conv_transpose_filters
+from core.nn import get_imgnet_var
 
 # config device
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
@@ -47,20 +48,21 @@ with tf.device('/cpu:0'):
 params_model = {
     'batch': 2,
     'l2_weight': 0.0002,
-    'init_lr': 1e-8,
+    'init_lr': 1e-5, # original paper: 1e-8,
     'data_format': 'NCHW', # optimal for cudnn
     'save_path': '../data/ckpts/parent_binary_train.ckpt',
     'tsboard_logs': '../data/tsboard_logs/',
-    'restore_ckpt': '../data/ckpts/imgnet.ckpt' # restore model from where
+    'restore_imgnet': '../data/ckpts/imgnet.ckpt', # restore model from where
+    'restore_parent_bin': '../data/ckpts/parent_binary_train.ckpt-xxx'
 }
 # define epochs
 epochs = 5
 num_frames = 4209 * 3
 steps_per_epochs = num_frames
 global_step = 0
-save_ckpt_interval = 12500
-summary_write_interval = 50
-print_screen_interval = 10
+save_ckpt_interval = 12500 # 12500
+summary_write_interval = 50 # 50
+print_screen_interval = 20
 
 # display traning images/gts
 feed_img = next_batch['img']
@@ -72,16 +74,16 @@ sum_weight = tf.summary.image('input_weight', tf.cast(feed_weight, tf.float16))
 
 # build network, on GPU by default
 model = resnet.ResNet(params_model)
-tf.placeholder(tf.int32, [None, ])
-loss, step = resnet.train(feed_img, feed_gt, feed_weight)
+loss, step = model.train(feed_img, feed_gt, feed_weight)
 init_op = tf.global_variables_initializer()
 sum_all = tf.summary.merge_all()
 
 # define saver
-saver = tf.train.Saver(max_to_keep=10)
+saver_img = tf.train.Saver(var_list=get_imgnet_var())
+saver_parent = tf.train.Saver()
 
 # run the session
-with tf.Session() as sess:
+with tf.Session(config=config_gpu) as sess:
     sum_writer = tf.summary.FileWriter(params_model['tsboard_logs'], sess.graph)
     sess.run(init_op)
     iter_50_handle = sess.run(iter_50.string_handle())
@@ -89,16 +91,19 @@ with tf.Session() as sess:
     iter_100_handle = sess.run(iter_100.string_handle())
 
     # restore all variables
-    saver.restore(sess, params_model['restore_ckpt'])
+    saver_img.restore(sess, params_model['restore_imgnet'])
+    print('restored variables from {}'.format(params_model['restore_imgnet']))
+    # saver_parent.restore(sess, params_model['restore_parent_bin'])
+    # print('restored variables from {}'.format(params_model['restore_parent_bin']))
     # set deconv filters
     sess.run(set_conv_transpose_filters(tf.global_variables()))
     print('All weights initialized.')
 
     # each step choose a random scale/dataset for training
-    print("Starting training ...")
+    print("Starting training for {0} epochs, {1} global steps.".format(epochs, num_frames*epochs))
     for ep in range(epochs):
         print("Epoch {} ...".format(ep))
-        for step in range(steps_per_epochs):
+        for local_step in range(steps_per_epochs):
 
             # randomly choose image scales from [0.5, 0.8, 1.0]
             rand_v = np.random.rand()
@@ -123,10 +128,11 @@ with tf.Session() as sess:
 
             # save .ckpt
             if global_step % save_ckpt_interval == 0 and global_step != 0:
-                saver.save(sess=sess,
+                saver_parent.save(sess=sess,
                            save_path = params_model['save_path'],
                            global_step=global_step,
                            write_meta_graph=False)
+                print('Saved checkpoint.')
             global_step += 1
 
     print("Finished training.")

@@ -137,7 +137,7 @@ class DAVIS_dataset():
         weight_neg = 1.0 - weight_pos
 
         mat_pos = tf.multiply(tf.cast(example['gt'], tf.float32), weight_pos)
-        mat_neg = tf.multiply( tf.cast(1-example['gt'], tf.float32), weight_neg)
+        mat_neg = tf.multiply(tf.cast(1-example['gt'], tf.float32), weight_neg)
         mat_weight = tf.add(mat_pos, mat_neg)
 
         gt = tf.cast(example['gt'], tf.float32)
