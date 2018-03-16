@@ -70,6 +70,7 @@ class DAVIS_dataset():
             self._dataset = self._build_pipeline()
         elif self._mode == 'parent_finetune_binary':
             self._seq = self._get_seq_frames()
+            print('Got {0} frames for seq {1}'.format(len(self._seq), self._seq_path))
         else:
             sys.exit("Not supported mode.")
         if self._mode == 'parent_train_binary' and self._dataset is None:
@@ -217,14 +218,26 @@ class DAVIS_dataset():
 
     def get_one_shot_pair(self):
         '''
-        :return: [img, gt] for the one-shot fine-tuning of the self._seq
+        :return: [img, gt, weight] for the one-shot fine-tuning of the self._seq
         '''
         pair = []
         pair.append(self._seq[0])
 
         gt_path = os.path.join(self._seq_path.replace('JPEGImages','Annotations'), '00000.png')
         gt = np.array(Image.open(gt_path)).astype(np.int32)
+        gt = np.expand_dims(gt, axis=1) # [H,W,1]
         pair.append(gt)
+
+        # Compute balanced weight for training, [H,W,1]
+        num_pos = np.reduce_sum(gt)
+        num_neg = np.reduce_sum(1-gt)
+        num_total = num_pos + num_neg
+        weight_pos = num_neg.astype(np.float32) / num_total.astype(np.float32)
+        weight_neg = 1.0 - weight_pos
+        mat_pos = np.multiply(gt.astype(np.float32), weight_pos)
+        mat_neg = np.multiply((1.0-gt).astype(np.float32), weight_neg)
+        mat_weight = tf.add(mat_pos, mat_neg)
+        pair.append(mat_weight)
 
         return pair
 
