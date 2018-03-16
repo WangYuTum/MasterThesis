@@ -170,7 +170,7 @@ class ResNet():
         # pred_out = tf.argmax(tf.nn.softmax(pred_out), axis=3) # [batch, H, W]
         # pred_out = tf.expand_dims(pred_out, -1) # [batch, H, W, 1]
         pred_out = pred_out[:,:,:,1:2]
-        tf.summary.image('pred', tf.cast(pred_out, tf.float16))
+        tf.summary.image('pred', tf.cast(tf.nn.softmax(pred_out), tf.float16))
 
         update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
         with tf.control_dependencies(update_ops):
@@ -188,9 +188,9 @@ class ResNet():
         if self._data_format == "NCHW":
             net_out = tf.transpose(net_out, [0, 2, 3, 1])
         prob_map = tf.nn.softmax(net_out) # [batch, H, W, 2]
-        pred_mask = tf.argmax(tf.nn.softmax(prob_map), axis=3) # [batch, H, W]
+        pred_mask = tf.argmax(prob_map, axis=3, output_type=tf.int16) # [batch, H, W]
 
-        return prob_map, pred_mask
+        return prob_map[:,:,:,1:], pred_mask
 
     def _balanced_cross_entropy(self, input_tensor, labels, weight):
         '''
@@ -225,61 +225,26 @@ class ResNet():
 
         return tf.multiply(self._l2_weight, tf.add_n(l2_losses))
 
-    def  _flatten_logits(self, input_tensor):
-        '''
-        :param input_tensor: Must have shape [N, H, W, 2]
-        :return: the same tensor with shape [N, H*W, 2]
-        '''
-        kernel = tf.Variable([[[[1, 0], [0, 1]]]], dtype=tf.float32, trainable=False, name='flatten_logits_kernel')
-        flatten_out = tf.nn.conv2d(input_tensor, kernel, strides=[1, 1, 1, 1], padding='VALID', data_format="NHWC")
-
-        return flatten_out
-
-    def _flatten_labels(self, input_tensor, dtype):
-        '''
-        :param input_tensor: labels/weights have shape [N, H, W, 1]
-        :return: flattened tensor with shape [N, H*W]
-        '''
-        if dtype == "tf.int32":
-            input_tensor = tf.cast(input_tensor, tf.float32)
-        kernel = tf.Variable([[[[1]]]], dtype=tf.float32, trainable=False, name='flatten_label_kernel')
-        flatten_out = tf.nn.conv2d(input_tensor, kernel, strides=[1,1,1,1], padding='VALID', data_format="NHWC")
-        if dtype == "tf.int32":
-            flatten_out = tf.cast(flatten_out, tf.int32)
-
-        return flatten_out
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    # def  _flatten_logits(self, input_tensor):
+    #     '''
+    #     :param input_tensor: Must have shape [N, H, W, 2]
+    #     :return: the same tensor with shape [N, H*W, 2]
+    #     '''
+    #     kernel = tf.Variable([[[[1, 0], [0, 1]]]], dtype=tf.float32, trainable=False, name='flatten_logits_kernel')
+    #     flatten_out = tf.nn.conv2d(input_tensor, kernel, strides=[1, 1, 1, 1], padding='VALID', data_format="NHWC")
+    #
+    #     return flatten_out
+    #
+    # def _flatten_labels(self, input_tensor, dtype):
+    #     '''
+    #     :param input_tensor: labels/weights have shape [N, H, W, 1]
+    #     :return: flattened tensor with shape [N, H*W]
+    #     '''
+    #     if dtype == "tf.int32":
+    #         input_tensor = tf.cast(input_tensor, tf.float32)
+    #     kernel = tf.Variable([[[[1]]]], dtype=tf.float32, trainable=False, name='flatten_label_kernel')
+    #     flatten_out = tf.nn.conv2d(input_tensor, kernel, strides=[1,1,1,1], padding='VALID', data_format="NHWC")
+    #     if dtype == "tf.int32":
+    #         flatten_out = tf.cast(flatten_out, tf.int32)
+    #
+    #     return flatten_out
