@@ -169,8 +169,8 @@ class ResNet():
             pred_out = tf.transpose(net_out, [0, 2, 3, 1])
         # pred_out = tf.argmax(tf.nn.softmax(pred_out), axis=3) # [batch, H, W]
         # pred_out = tf.expand_dims(pred_out, -1) # [batch, H, W, 1]
-        pred_out = pred_out[:,:,:,1:2]
-        tf.summary.image('pred', tf.cast(tf.nn.softmax(pred_out), tf.float16))
+        # pred_out = pred_out[:,:,:,1:2]
+        tf.summary.image('pred', tf.cast(tf.nn.softmax(pred_out)[:,:,:,1:2], tf.float16))
 
         update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
         with tf.control_dependencies(update_ops):
@@ -188,7 +188,7 @@ class ResNet():
         if self._data_format == "NCHW":
             net_out = tf.transpose(net_out, [0, 2, 3, 1])
         prob_map = tf.nn.softmax(net_out) # [batch, H, W, 2]
-        pred_mask = tf.argmax(prob_map, axis=3, output_type=tf.int16) # [batch, H, W]
+        pred_mask = tf.argmax(prob_map, axis=3, output_type=tf.int32)  # [batch, H, W]
 
         return prob_map[:,:,:,1:], pred_mask
 
@@ -196,8 +196,7 @@ class ResNet():
         '''
         :param input_tensor: the output of final layer, must have shape [batch, C, H, W] or [batch, H, W, C], tf.float32
         :param labels: the gt binary labels, have the shape [batch, H, W, C], tf.int32
-        :param img_size: python list [H, W]
-        :param weight: shape [H, W, 1], tf.float32
+        :param weight: shape [batch, H, W, 1], tf.float32
         :return: balanced cross entropy loss, a scalar, tf.float32
         '''
 

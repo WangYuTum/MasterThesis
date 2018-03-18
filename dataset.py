@@ -224,19 +224,23 @@ class DAVIS_dataset():
         pair.append(self._seq[0])
 
         gt_path = os.path.join(self._seq_path.replace('JPEGImages','Annotations'), '00000.png')
-        gt = np.array(Image.open(gt_path)).astype(np.int32)
-        gt = np.expand_dims(gt, axis=1) # [H,W,1]
+        gt = np.array(Image.open(gt_path), dtype=np.int8)
+        # convert to binary
+        gt_bool = np.greater(gt, 0)
+        gt_bin = gt_bool.astype(np.uint8)
+
+        gt = np.expand_dims(gt_bin, axis=-1) # [H,W,1]
         pair.append(gt)
 
         # Compute balanced weight for training, [H,W,1]
-        num_pos = np.reduce_sum(gt)
-        num_neg = np.reduce_sum(1-gt)
+        num_pos = np.sum(gt)
+        num_neg = np.sum(1-gt)
         num_total = num_pos + num_neg
         weight_pos = num_neg.astype(np.float32) / num_total.astype(np.float32)
         weight_neg = 1.0 - weight_pos
         mat_pos = np.multiply(gt.astype(np.float32), weight_pos)
         mat_neg = np.multiply((1.0-gt).astype(np.float32), weight_neg)
-        mat_weight = tf.add(mat_pos, mat_neg)
+        mat_weight = np.add(mat_pos, mat_neg)
         pair.append(mat_weight)
 
         return pair

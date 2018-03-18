@@ -10,16 +10,17 @@ from dataset import DAVIS_dataset
 from core import resnet
 from core.nn import set_conv_transpose_filters
 from scipy.misc import imsave
+from tensorflow.python import debug as tf_debug
 
 
 # set fine-tune or test
-FINE_TUNE = 1
-FINE_TUNE_seq = 0 # max 30
+FINE_TUNE = 0
+FINE_TUNE_seq = 29 # max 30
 
 # config device
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 config_gpu = tf.ConfigProto()
-config_gpu.gpu_options.per_process_gpu_memory_fraction = 0.5
+config_gpu.gpu_options.per_process_gpu_memory_fraction = 0.4
 
 # get all val seq paths
 val_seq_txt = '../../../DAVIS17_train_val/ImageSets/2017/val.txt'
@@ -59,22 +60,21 @@ if FINE_TUNE == 1:
     params_model = {
         'batch': 1,
         'l2_weight': 0.0002,
-        'init_lr': 1e-8, # original paper: 1e-8,
+        'init_lr': 1e-5, # original paper: 1e-8, can be further tuned
         'data_format': 'NCHW', # optimal for cudnn
         'save_path': '../data/ckpts/fine-tune/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt',
         'tsboard_logs': '../data/tsboard_logs/fine-tune/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1],
-        'restore_parent_bin': '../data/ckpts/parent_binary_train.ckpt-xxx'
+        'restore_parent_bin': '../data/ckpts/parent_binary_train.ckpt-62500'
     }
-    global_iters = 1000 # original paper: 500
+    global_iters = 500 # original paper: 500
     save_ckpt_interval = 500
-    summary_write_interval = 5
-    print_screen_interval = 5
-
+    summary_write_interval = 10
+    print_screen_interval = 10
 else:
     params_model = {
         'batch': 1,
         'data_format': 'NCHW',  # optimal for cudnn
-        'restore_fine-tune_bin': '../data/ckpts/fine-tune/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt-xxx',
+        'restore_fine-tune_bin': '../data/ckpts/fine-tune/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt-500',
         'save_result_path': '../data/results/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]
     }
 
@@ -102,6 +102,10 @@ else:
 
 # run session
 with tf.Session(config=config_gpu) as sess:
+    # DEBUG
+    # sess = tf_debug.LocalCLIDebugWrapperSession(sess)
+    # sess.add_tensor_filter("has_inf_or_nan", tf_debug.has_inf_or_nan)
+
     if FINE_TUNE == 1:
         sum_writer = tf.summary.FileWriter(params_model['tsboard_logs'], sess.graph)
     sess.run(init_op)
@@ -136,7 +140,7 @@ with tf.Session(config=config_gpu) as sess:
                                      save_path=params_model['save_path'],
                                      global_step=iter_step+1,
                                      write_meta_graph=False)
-                print('Saved checkpoint at iter {}'.format(iter_step))
+                print('Saved checkpoint at iter {}'.format(iter_step+1))
         print("Finished fine-tuning.")
 
     else:
@@ -151,8 +155,9 @@ with tf.Session(config=config_gpu) as sess:
             # save binary mask
             imsave(save_path, np.squeeze(mask_))
             # save prob map
-            imsave(save_path.replace('.png', '_prob.png'), np.squeeze(prob_map_))
+            # imsave(save_path.replace('.png', '_prob.png'), np.squeeze(prob_map_))
             print("Saved result.")
+        print("Finished inference.")
 
 
 
