@@ -5,8 +5,6 @@
     TODO:
         ** padding in deconv layer: used SAME-osvos. consider VALID suggested from online_tutorial ?
         ** bias layers: added on side path. on backbone net?
-        ** load pre-trained ImageNet ckpt. In RGB order
-        **** Saver for save/restore weights. Check for the saved weights
         * Learning rate scheduler
         * side supervision loss. read InceptionNet
         * Apply diff lr for diff layers
