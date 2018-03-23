@@ -14,7 +14,7 @@ from core.nn import get_imgnet_var
 # config device
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 config_gpu = tf.ConfigProto()
-config_gpu.gpu_options.per_process_gpu_memory_fraction = 0.5
+config_gpu.gpu_options.per_process_gpu_memory_fraction = 0.95
 
 # config dataset params (3 datasets with different scales)
 params_data50 = {
@@ -49,18 +49,21 @@ params_model = {
     'batch': 2,
     'l2_weight': 0.0002,
     'init_lr': 1e-5, # original paper: 1e-8,
+    'base_decay': 1.0,
+    'sup_decay': 0.1,
+    'fuse_decay': 0.01,
     'data_format': 'NCHW', # optimal for cudnn
-    'save_path': '../data/ckpts/parent_binary_train.ckpt',
-    'tsboard_logs': '../data/tsboard_logs/',
+    'save_path': '../data/ckpts/parent-sup/parent_binary_train.ckpt',
+    'tsboard_logs': '../data/tsboard_logs/parent-sup/',
     'restore_imgnet': '../data/ckpts/imgnet.ckpt', # restore model from where
     'restore_parent_bin': '../data/ckpts/parent_binary_train.ckpt-xxx'
 }
 # define epochs
 epochs = 5
 num_frames = 4209 * 3
-steps_per_epochs = num_frames
+steps_per_epochs = int(num_frames / params_model['batch'])
 global_step = 0
-save_ckpt_interval = 12500 # 12500
+save_ckpt_interval = 6000
 summary_write_interval = 50 # 50
 print_screen_interval = 20
 

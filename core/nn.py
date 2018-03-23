@@ -86,7 +86,6 @@ def create_conv_kernel(shape=None):
     :param shape: the shape of kernel to be created
     :return: a tf.tensor
     '''
-    # TODO: check if first created or restored
     init_op = tf.truncated_normal_initializer(stddev=0.001)
     var = tf.get_variable(name='kernel', shape=shape, initializer=init_op)
 
@@ -132,7 +131,6 @@ def BN(data_format, input_tensor, bn_scope=None, shape=None, is_train=False):
     else:
         norm_axis = -1
 
-    # TODO: check if tf.train.Saver restore variables of bn layer
     bn_out = tf.layers.batch_normalization(inputs=input_tensor,
                                            axis=norm_axis,
                                            momentum=0.99,
@@ -156,7 +154,6 @@ def BN(data_format, input_tensor, bn_scope=None, shape=None, is_train=False):
 
 def get_bn_params():
     # When first initialized/created use zero/one init, otherwise restore from .ckpt
-    # TODO: check if first created or restored
 
     init_beta = tf.zeros_initializer()
     init_mean = tf.zeros_initializer()
@@ -211,27 +208,31 @@ def set_conv_transpose_filters(variables):
     return set_filter_ops
 
 
-def conv_transpose(data_format, input_tensor, factor=0, padding='SAME'):
+def conv_transpose(data_format, input_tensor, filter_size, factor=0, padding='SAME'):
     # Create a transposed conv layer according to upsampling factor.
     # This function must be put into an appropriate variable scope.
     # All transposed filters must be reset to bilinear after tf.train.Saver store the variables
 
+    # filter_size
+    in_channel = filter_size[0]
+    out_channel = filter_size[1]
+
     batch_size = tf.shape(input_tensor)[0]
     trans_ksize = get_conv_transpose_ksize(factor)
     init_filter = tf.get_variable('bilinear-up',
-                                  shape=[trans_ksize, trans_ksize, 16, 16],
+                                  shape=[trans_ksize, trans_ksize, out_channel, in_channel],
                                   initializer = tf.zeros_initializer(),
                                   trainable = False)
     if data_format == "NCHW":
         # out_channels = tf.shape(input_tensor)[1]
-        out_channels = 16
+        out_channels = out_channel
         new_H = tf.shape(input_tensor)[2] * factor
         new_W = tf.shape(input_tensor)[3] * factor
         trans_output_shape = [batch_size, out_channels, new_H, new_W]
         trans_stride = [1, 1, factor, factor]
     else:
         # out_channels = tf.shape(input_tensor)[3]
-        out_channels = 16
+        out_channels = out_channel
         new_H = tf.shape(input_tensor)[1]
         new_W = tf.shape(input_tensor)[2]
         trans_output_shape = [batch_size, new_H, new_W, out_channels]

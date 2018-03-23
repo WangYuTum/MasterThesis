@@ -5,9 +5,8 @@
     TODO:
         ** padding in deconv layer: used SAME-osvos. consider VALID suggested from online_tutorial ?
         ** bias layers: added on side path. on backbone net?
+        * apply diff lr to diff layers
         * Learning rate scheduler
-        * side supervision loss. read InceptionNet
-        * Apply diff lr for diff layers
         * Estimator ...
 '''
 
@@ -33,6 +32,9 @@ class ResNet():
         self._batch = params.get('batch', 2)
         self._l2_weight = params.get('l2_weight', 0.0002)
         self._init_lr = params.get('init_lr', 1e-8)
+        self._base_decay = params.get('base_decay', 1.0)
+        self._sup_decay = params.get('sup_decay', 0.1)
+        self._fuse_decay = params.get('fuse_decay', 0.01)
 
         if self._data_format is not "NCHW" and self._data_format is not "NHWC":
             sys.exit("Invalid data format. Must be either 'NCHW' or 'NHWC'.")
@@ -41,7 +43,7 @@ class ResNet():
         '''
         :param image: image in RGB format
         :param is_train: either True or False
-        :return: a model dict containing all Tensors
+        :return: main output and side supervision
         '''
         model = {}
         if is_train:
@@ -121,23 +123,50 @@ class ResNet():
             with tf.variable_scope('B1_side_path'):
                 side_2 = nn.conv_layer(self._data_format, model['B1_2'], 1, 'SAME', [3, 3, 128, 16])
                 side_2 = nn.bias_layer(self._data_format, side_2, [16])
-                side_2_f = nn.conv_transpose(self._data_format, side_2, 2, 'SAME')
+                side_2_f = nn.conv_transpose(self._data_format, side_2, [16, 16], 2, 'SAME')
                 side_2_f = nn.crop_features(self._data_format, side_2_f, im_size)
             with tf.variable_scope('B2_side_path'):
                 side_4 = nn.conv_layer(self._data_format, model['B2_2'], 1, 'SAME', [3, 3, 256, 16])
                 side_4 = nn.bias_layer(self._data_format, side_4, 16)
-                side_4_f = nn.conv_transpose(self._data_format, side_4, 4, 'SAME')
+                side_4_f = nn.conv_transpose(self._data_format, side_4, [16, 16], 4, 'SAME')
                 side_4_f = nn.crop_features(self._data_format, side_4_f, im_size)
             with tf.variable_scope('B3_side_path'):
                 side_8 = nn.conv_layer(self._data_format, model['B3_5'], 1, 'SAME', [3, 3, 512, 16])
                 side_8 = nn.bias_layer(self._data_format, side_8, 16)
-                side_8_f = nn.conv_transpose(self._data_format, side_8, 8, 'SAME')
+                side_8_f = nn.conv_transpose(self._data_format, side_8, [16, 16], 8, 'SAME')
                 side_8_f = nn.crop_features(self._data_format, side_8_f, im_size)
             with tf.variable_scope('B4_side_path'):
                 side_16 = nn.conv_layer(self._data_format, model['B4_2'], 1, 'SAME', [3, 3, 1024, 16])
                 side_16 = nn.bias_layer(self._data_format, side_16, 16)
-                side_16_f = nn.conv_transpose(self._data_format, side_16, 16, 'SAME')
+                side_16_f = nn.conv_transpose(self._data_format, side_16, [16, 16], 16, 'SAME')
                 side_16_f = nn.crop_features(self._data_format, side_16_f, im_size)
+
+            # add side path supervision
+            sup_out = {}
+            with tf.variable_scope('B1_side_sup'):
+                side_2_s = nn.conv_layer(self._data_format, side_2, 1, 'SAME', [1, 1, 16, 2])
+                side_2_s = nn.bias_layer(self._data_format, side_2_s, [2])
+                side_2_s = nn.conv_transpose(self._data_format, side_2_s, [2, 2], 2, 'SAME')
+                side_2_s = nn.crop_features(self._data_format, side_2_s, im_size)
+                sup_out['side_2_s'] = side_2_s
+            with tf.variable_scope('B2_side_sup'):
+                side_4_s = nn.conv_layer(self._data_format, side_4, 1, 'SAME', [1, 1, 16, 2])
+                side_4_s = nn.bias_layer(self._data_format, side_4_s, [2])
+                side_4_s = nn.conv_transpose(self._data_format, side_4_s, [2, 2], 4, 'SAME')
+                side_4_s = nn.crop_features(self._data_format, side_4_s, im_size)
+                sup_out['side_4_s'] = side_4_s
+            with tf.variable_scope('B3_side_sup'):
+                side_8_s = nn.conv_layer(self._data_format, side_8, 1, 'SAME', [1, 1, 16, 2])
+                side_8_s = nn.bias_layer(self._data_format, side_8_s, [2])
+                side_8_s = nn.conv_transpose(self._data_format, side_8_s, [2, 2], 8, 'SAME')
+                side_8_s = nn.crop_features(self._data_format, side_8_s, im_size)
+                sup_out['side_8_s'] = side_8_s
+            with tf.variable_scope('B4_side_sup'):
+                side_16_s = nn.conv_layer(self._data_format, side_16, 1, 'SAME', [1, 1, 16, 2])
+                side_16_s = nn.bias_layer(self._data_format, side_16_s, [2])
+                side_16_s = nn.conv_transpose(self._data_format, side_16_s, [2, 2], 16, 'SAME')
+                side_16_s = nn.crop_features(self._data_format, side_16_s, im_size)
+                sup_out['side_16_s'] = side_16_s
 
             # concat and linearly fuse
             if self._data_format == "NCHW":
@@ -148,7 +177,7 @@ class ResNet():
                 net_out = nn.conv_layer(self._data_format, concat_side, 1, 'SAME', [1, 1, 64, 2])
                 net_out = nn.bias_layer(self._data_format, net_out, 2)
 
-        return net_out
+        return net_out, sup_out
 
     def train(self, images, gts, weight):
         '''
@@ -158,13 +187,17 @@ class ResNet():
         :return: a tf.Tensor scalar, a train op
         '''
 
-        net_out = self._build_model(images, True) # [N, C, H, W] or [N, H, W, C]
-        total_loss = self._balanced_cross_entropy(net_out, gts, weight) + self._l2_loss()
+        net_out, sup_out = self._build_model(images, True) # [N, C, H, W] or [N, H, W, C]
+        total_loss = self._balanced_cross_entropy(net_out, gts, weight) \
+                     + self._sup_loss(sup_out, gts, weight) \
+                     + self._l2_loss()
         tf.summary.scalar('total_loss', total_loss)
 
         # display current predict
         if self._data_format == "NCHW":
             pred_out = tf.transpose(net_out, [0, 2, 3, 1])
+        else:
+            pred_out = net_out
         # pred_out = tf.argmax(tf.nn.softmax(pred_out), axis=3) # [batch, H, W]
         # pred_out = tf.expand_dims(pred_out, -1) # [batch, H, W, 1]
         # pred_out = pred_out[:,:,:,1:2]
@@ -221,6 +254,21 @@ class ResNet():
             l2_losses.append(tf.nn.l2_loss(var))
 
         return tf.multiply(self._l2_weight, tf.add_n(l2_losses))
+
+    def _sup_loss(self, sup_dict, gts, weight):
+
+        side_2_loss = self._balanced_cross_entropy(sup_dict['side_2_s'], gts, weight)
+        tf.summary.scalar('side_2_loss', side_2_loss)
+        side_4_loss = self._balanced_cross_entropy(sup_dict['side_4_s'], gts, weight)
+        tf.summary.scalar('side_4_loss', side_4_loss)
+        side_8_loss = self._balanced_cross_entropy(sup_dict['side_8_s'], gts, weight)
+        tf.summary.scalar('side_8_loss', side_8_loss)
+        side_16_loss = self._balanced_cross_entropy(sup_dict['side_16_s'], gts, weight)
+        tf.summary.scalar('side_16_loss', side_16_loss)
+
+        side_total = 0.5 * side_2_loss + 0.5 * side_4_loss + 0.5 * side_8_loss + 0.5 * side_16_loss
+
+        return side_total
 
     # def  _flatten_logits(self, input_tensor):
     #     '''
