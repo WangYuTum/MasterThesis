@@ -13,6 +13,7 @@ from PIL import Image
 import sys
 import os
 from scipy.misc import imresize
+from scipy.ndimage.morphology import binary_dilation
 import multiprocessing
 
 train_root = '/usr/stud/wangyu/DAVIS17_train_val'
@@ -46,9 +47,10 @@ def get_file_list(train_root, train_list_txt, train_gt_txt):
 
 def load_img(file_pair, scale):
     ''' Input:  a list of length 2: [img_name, gt_name]
-        Return: two arrays: [img_arr, gt_arr]
+        Return: 3 arrays: [img_arr, gt_arr, boundary_arr]
             img_arr: [480,854,3]
             gt_arr: [480,854]
+            gt_boundary: [480,854]
         Note: resize to train/gt images to [480,854] first, then rescale
     '''
     img = Image.open(file_pair[0])
@@ -61,13 +63,20 @@ def load_img(file_pair, scale):
     gt_label_bin = gt_label_bool.astype(np.uint8)
     gt_label_bin_sc = imresize(gt_label_bin, (480, 854), interp='nearest')
     gt_label_bin = np.array(gt_label_bin_sc, dtype=np.uint8)
+    # compute binary pixel-wise boundary, width=4
+    gt_label_grad = np.gradient(gt_label_bin)
+    gt_label_grad = np.transpose(gt_label_grad, [1, 2, 0])
+    img_boundary = np.greater(gt_label_grad[:, :, 1] + gt_label_grad[:, :, 0], 0).astype(np.uint8)
+    img_boundary = binary_dilation(img_boundary)
 
     img_sc = imresize(image, scale)
     gt_sc = imresize(gt_label_bin, scale, interp='nearest')
+    img_boundary_sc = imresize(img_boundary, scale, interp='nearest')
     new_img = np.array(img_sc, dtype=np.uint8)
     new_gt = np.array(gt_sc, dtype=np.uint8)
+    new_boundary = np.array(img_boundary_sc, dtype=np.uint8)
 
-    return new_img, new_gt
+    return new_img, new_gt, new_boundary
 
 
 def _int64_feature(value):
@@ -79,7 +88,7 @@ def wrap_a_data_dict(file_pair, scale):
         Return: Dict
     '''
     data_dict = {}
-    data_dict['img'], data_dict['gt'] = load_img(file_pair, scale)
+    data_dict['img'], data_dict['gt'], data_dict['boundary'] = load_img(file_pair, scale)
 
     return data_dict
 
@@ -90,7 +99,8 @@ def write_single_record(record_writer, data_dict):
     '''
     example = tf.train.Example(features=tf.train.Features(feature={
         'img': _int64_feature(data_dict['img'].flatten()),
-        'gt': _int64_feature(data_dict['gt'].flatten()), }))
+        'gt': _int64_feature(data_dict['gt'].flatten()),
+        'boundary': _int64_feature(data_dict['boundary'].flatten()), }))
     record_writer.write(example.SerializeToString())
 
 

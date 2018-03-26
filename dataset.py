@@ -90,7 +90,8 @@ class DAVIS_dataset():
             img_W = int(854 * self._scale / 100)
             record_features = {
                 "img": tf.FixedLenFeature([img_H,img_W,3], tf.int64),
-                "gt": tf.FixedLenFeature([img_H,img_W,1], tf.int64)
+                "gt": tf.FixedLenFeature([img_H,img_W,1], tf.int64),
+                "boundary": tf.FixedLenFeature([img_H,img_W,1], tf.int64),
             }
         else:
             sys.exit("Current mode not supported.")
@@ -101,6 +102,7 @@ class DAVIS_dataset():
         # Cast RGB pixels to tf.float32, gt to tf.int32
         data_dict['img'] = tf.cast(out_data['img'], tf.float32)
         data_dict['gt'] = tf.cast(out_data['gt'], tf.int32)
+        data_dict['boundary'] = tf.cast(out_data['boundary'], tf.int32)
 
         return data_dict
 
@@ -117,6 +119,7 @@ class DAVIS_dataset():
         tranformed = {}
         tranformed['img'] = rgb_img
         tranformed['gt'] = example['gt']
+        tranformed['boundary'] = example['boundary']
 
         return tranformed
 
@@ -142,17 +145,20 @@ class DAVIS_dataset():
         mat_weight = tf.add(mat_pos, mat_neg)
 
         gt = tf.cast(example['gt'], tf.float32)
-        stacked = tf.concat([example['img'], gt, mat_weight], axis=-1) # shape: [H, W, 5]
+        boundary = tf.cast(example['boundary'], tf.float32)
+        stacked = tf.concat([example['img'], gt, mat_weight, boundary], axis=-1) # shape: [H, W, 6]
         stacked = tf.image.random_flip_left_right(stacked)
 
         # Pack the result
         image = stacked[:,:,0:3]
         gt = tf.cast(stacked[:,:,3:4], tf.int32)
         balanced_mat = stacked[:,:,4:5]
+        boundary = tf.cast(stacked[:,:,5:6], tf.int32)
         transformed = {}
         transformed['img'] = image
         transformed['gt'] = gt
         transformed['balanced_mat'] = balanced_mat
+        transformed['boundary'] = boundary
 
         return  transformed
 
