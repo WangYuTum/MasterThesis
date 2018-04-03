@@ -77,7 +77,7 @@ sum_weight = tf.summary.image('input_weight', tf.cast(feed_weight, tf.float16))
 
 # build network, on GPU by default
 model = resnet.ResNet(params_model)
-loss, step = model.train(feed_img, feed_gt, feed_weight)
+loss, step = model.train(feed_img, feed_gt, feed_weight, 1, 0)
 init_op = tf.global_variables_initializer()
 sum_all = tf.summary.merge_all()
 

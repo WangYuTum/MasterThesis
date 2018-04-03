@@ -12,15 +12,20 @@ from core.nn import set_conv_transpose_filters
 from scipy.misc import imsave
 from tensorflow.python import debug as tf_debug
 
+# parse argument
+arg_fine_tune = int(sys.argv[1])
+arg_fine_tune_seq = int(sys.argv[2])
+
 
 # set fine-tune or test
-FINE_TUNE = 0
-FINE_TUNE_seq = 29 # max 30
+FINE_TUNE = arg_fine_tune
+FINE_TUNE_seq = arg_fine_tune_seq # max 30
+SUP = 0
 
 # config device
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 config_gpu = tf.ConfigProto()
-config_gpu.gpu_options.per_process_gpu_memory_fraction = 0.4
+config_gpu.gpu_options.per_process_gpu_memory_fraction = 0.6
 
 # get all val seq paths
 val_seq_txt = '../../../DAVIS17_train_val/ImageSets/2017/val.txt'
@@ -64,7 +69,7 @@ if FINE_TUNE == 1:
         'data_format': 'NCHW', # optimal for cudnn
         'save_path': '../data/ckpts/fine-tune/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt',
         'tsboard_logs': '../data/tsboard_logs/fine-tune/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1],
-        'restore_parent_bin': '../data/ckpts/parent_binary_train.ckpt-62500'
+        'restore_parent_bin': '../data/ckpts/parent-sup/parent_binary_train.ckpt-30000'
     }
     global_iters = 500 # original paper: 500
     save_ckpt_interval = 500
@@ -87,8 +92,7 @@ if FINE_TUNE == 1:
 # build network, on GPU by default
 model = resnet.ResNet(params_model)
 if FINE_TUNE == 1:
-    # TODO: shut down batch norm update ???
-    loss, step = model.train(feed_img, feed_one_shot_gt, feed_one_shot_weight)
+    loss, step = model.train(feed_img, feed_one_shot_gt, feed_one_shot_weight, SUP, 1)
     init_op = tf.global_variables_initializer()
     sum_all = tf.summary.merge_all()
     # define Saver
