@@ -179,18 +179,24 @@ class ResNet():
 
         return net_out, sup_out
 
-    def train(self, images, gts, weight):
+    def train(self, images, gts, weight, sup, fine_tune):
         '''
         :param images: batch of images have shape [batch, H, W, 3] where H, W depend on the scale of dataset
         :param gts: batch of gts have shape [batch, H, W, 1]
         :param weight: batch of balanced weights have shape [batch, H, W, 1]
+        :param sup: whether to use side supversion
+        :param fine_tune: whether in fine-tune or not. If fine-tune, BN update turned off
         :return: a tf.Tensor scalar, a train op
         '''
 
         net_out, sup_out = self._build_model(images, True) # [N, C, H, W] or [N, H, W, C]
-        total_loss = self._balanced_cross_entropy(net_out, gts, weight) \
-                     + self._sup_loss(sup_out, gts, weight) \
-                     + self._l2_loss()
+        if sup == 1:
+            total_loss = self._balanced_cross_entropy(net_out, gts, weight) \
+                        + self._sup_loss(sup_out, gts, weight) \
+                        + self._l2_loss()
+        else:
+            total_loss = self._balanced_cross_entropy(net_out, gts, weight) \
+                        + self._l2_loss()
         tf.summary.scalar('total_loss', total_loss)
 
         # display current predict
@@ -203,9 +209,12 @@ class ResNet():
         # pred_out = pred_out[:,:,:,1:2]
         tf.summary.image('pred', tf.cast(tf.nn.softmax(pred_out)[:,:,:,1:2], tf.float16))
 
-        update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-        with tf.control_dependencies(update_ops):
+        if fine_tune == 1:
             train_step = tf.train.AdamOptimizer(self._init_lr).minimize(total_loss)
+        else:
+            update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+            with tf.control_dependencies(update_ops):
+                train_step = tf.train.AdamOptimizer(self._init_lr).minimize(total_loss)
         print("Model built.")
 
         return total_loss, train_step
