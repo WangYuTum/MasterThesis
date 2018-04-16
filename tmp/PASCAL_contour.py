@@ -41,3 +41,4 @@ def get_bin_contour(file_name):
 def get_train_pairs():
     train_list = get_train_set()
     for item in train_list:
+        pass
