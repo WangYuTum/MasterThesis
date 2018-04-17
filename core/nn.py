@@ -246,6 +246,79 @@ def get_imgnet_var():
     return imgnet_dict
 
 
+def param_lr():
+    '''
+    Set relative learning rate for different layers. The final lr is the global lr multiplied by the relative rate.
+    :return: A dict key: var_name, value: relative rate
+    '''
+    vars_lr = dict()
+    
+    vars_lr['main/B0/kernel'] = 1.0
+
+    vars_lr['main/B1_0/side/kernel'] = 1.0
+    vars_lr['main/B1_0/conv1/kernel'] = 1.0
+    vars_lr['main/B1_0/conv2/kernel'] = 1.0
+    vars_lr['main/B1_1/conv1/kernel'] = 1.0
+    vars_lr['main/B1_1/conv2/kernel'] = 1.0
+    vars_lr['main/B1_2/conv1/kernel'] = 1.0
+    vars_lr['main/B1_2/conv2/kernel'] = 1.0
+
+    vars_lr['main/B2_0/side/kernel'] = 1.0
+    vars_lr['main/B2_0/conv1/kernel'] = 1.0
+    vars_lr['main/B2_0/conv2/kernel'] = 1.0
+    vars_lr['main/B2_1/conv1/kernel'] = 1.0
+    vars_lr['main/B2_1/conv2/kernel'] = 1.0
+    vars_lr['main/B2_2/conv1/kernel'] = 1.0
+    vars_lr['main/B2_2/conv2/kernel'] = 1.0
+
+    vars_lr['main/B3_0/side/kernel'] = 1.0
+    vars_lr['main/B3_0/conv1/kernel'] = 1.0
+    vars_lr['main/B3_0/conv2/kernel'] = 1.0
+    vars_lr['main/B3_1/conv1/kernel'] = 1.0
+    vars_lr['main/B3_1/conv2/kernel'] = 1.0
+    vars_lr['main/B3_2/conv1/kernel'] = 1.0
+    vars_lr['main/B3_2/conv2/kernel'] = 1.0
+    vars_lr['main/B3_3/conv1/kernel'] = 1.0
+    vars_lr['main/B3_3/conv2/kernel'] = 1.0
+    vars_lr['main/B3_4/conv1/kernel'] = 1.0
+    vars_lr['main/B3_4/conv2/kernel'] = 1.0
+    vars_lr['main/B3_5/conv1/kernel'] = 1.0
+    vars_lr['main/B3_5/conv2/kernel'] = 1.0
+
+    vars_lr['main/B4_0/side/kernel'] = 1.0
+    vars_lr['main/B4_0/conv1/kernel'] = 1.0
+    vars_lr['main/B4_0/conv2/kernel'] = 1.0
+    vars_lr['main/B4_1/conv1/kernel'] = 1.0
+    vars_lr['main/B4_1/conv2/kernel'] = 1.0
+    vars_lr['main/B4_2/conv1/kernel'] = 1.0
+    vars_lr['main/B4_2/conv2/kernel'] = 1.0
+
+    vars_lr['main/B1_side_path/kernel'] = 1.0
+    vars_lr['main/B1_side_path/bias'] = 2.0
+    vars_lr['main/B2_side_path/kernel'] = 1.0
+    vars_lr['main/B2_side_path/bias'] = 2.0
+    vars_lr['main/B3_side_path/kernel'] = 1.0
+    vars_lr['main/B3_side_path/bias'] = 2.0
+    vars_lr['main/B4_side_path/kernel'] = 1.0
+    vars_lr['main/B4_side_path/bias'] = 2.0
+
+    vars_lr['main/B1_side_sup/kernel'] = 0.1
+    vars_lr['main/B1_side_sup/bias'] = 0.2
+    vars_lr['main/B2_side_sup/kernel'] = 0.1
+    vars_lr['main/B2_side_sup/bias'] = 0.2
+    vars_lr['main/B3_side_sup/kernel'] = 0.1
+    vars_lr['main/B3_side_sup/bias'] = 0.2
+    vars_lr['main/B4_side_sup/kernel'] = 0.1
+    vars_lr['main/B4_side_sup/bias'] = 0.2
+
+    vars_lr['main/fuse/kernel'] = 0.01
+    vars_lr['main/fuse/bias'] = 0.02
+    
+    return vars_lr
+
+
+
+
 
 
 
