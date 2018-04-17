@@ -92,7 +92,7 @@ if FINE_TUNE == 1:
 # build network, on GPU by default
 model = resnet.ResNet(params_model)
 if FINE_TUNE == 1:
-    loss, step = model.train(feed_img, feed_one_shot_gt, feed_one_shot_weight, SUP, 1)
+    loss, step = model.train(feed_img, feed_one_shot_gt, feed_one_shot_weight, SUP)
     init_op = tf.global_variables_initializer()
     sum_all = tf.summary.merge_all()
     # define Saver

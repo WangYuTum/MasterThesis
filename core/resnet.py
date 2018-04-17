@@ -29,9 +29,9 @@ class ResNet():
         '''
 
         self._data_format = params.get('data_format', None)
-        self._batch = params.get('batch', 2)
+        self._batch = params.get('batch', 1)
         self._l2_weight = params.get('l2_weight', 0.0002)
-        self._init_lr = params.get('init_lr', 1e-8)
+        self._init_lr = params.get('init_lr', 1e-5)
         self._base_decay = params.get('base_decay', 1.0)
         self._sup_decay = params.get('sup_decay', 0.1)
         self._fuse_decay = params.get('fuse_decay', 0.01)
@@ -179,13 +179,12 @@ class ResNet():
 
         return net_out, sup_out
 
-    def train(self, images, gts, weight, sup, fine_tune):
+    def train(self, images, gts, weight, sup):
         '''
         :param images: batch of images have shape [batch, H, W, 3] where H, W depend on the scale of dataset
         :param gts: batch of gts have shape [batch, H, W, 1]
         :param weight: batch of balanced weights have shape [batch, H, W, 1]
         :param sup: use side supervision or not
-        :param fine_tune: whether in fine-tune or not. If fine-tune, turn off update on BN layers
         :return: a tf.Tensor scalar, a train op
         '''
 
@@ -208,14 +207,9 @@ class ResNet():
         # pred_out = pred_out[:,:,:,1:2]
         tf.summary.image('pred', tf.cast(tf.nn.softmax(pred_out)[:,:,:,1:2], tf.float16))
 
-        if fine_tune == 1:
-            train_step = tf.train.AdamOptimizer(self._init_lr).minimize(total_loss)
-            print("Model built.")
-        else:
-            update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-            with tf.control_dependencies(update_ops):
-                train_step = tf.train.AdamOptimizer(self._init_lr).minimize(total_loss)
-            print("Model built.")
+        # TODO: manually apply gradients
+        train_step = tf.train.AdamOptimizer(self._init_lr).minimize(total_loss)
+        print("Model built.")
 
         return total_loss, train_step
 

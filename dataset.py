@@ -34,7 +34,7 @@ class DAVIS_dataset():
             mode: 'parent_train_binary'-train network with independent frames
                   'parent_finetune_binary'-finetune network with 1st annotation of the seq
             seq_path: only used in mode 'parent_finetune_binary', e.g. 'DAVIS_root/JPEGImages/480p/bike-packing'
-            batch:  2
+            batch:  1
             tfrecord: None
         '''
 
@@ -45,8 +45,8 @@ class DAVIS_dataset():
         self._seq_path = params.get('seq_path', None)
         self._dataset = None # only used in mode 'parent_train_binary'
         self._scale = 100 # in percentage
-        self._map_threads = self._batch * 2
-        self._map_buffer = self._batch * 4
+        self._map_threads = self._batch * 4
+        self._map_buffer = self._batch * 8
         self._seq = None # only used in mode 'parent_finetune_binary'
         self._data_mean = np.array([115.195829334, 114.927476686, 107.725750308]).reshape((1,1,3))
         self._data_std = np.array([64.5572961827, 63.0172054007, 67.0494050908]).reshape((1,1,3))
