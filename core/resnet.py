@@ -179,12 +179,14 @@ class ResNet():
 
         return net_out, sup_out
 
-    def train(self, images, gts, weight, sup):
+    def train(self, images, gts, weight, sup, acc_count, global_step):
         '''
         :param images: batch of images have shape [batch, H, W, 3] where H, W depend on the scale of dataset
         :param gts: batch of gts have shape [batch, H, W, 1]
         :param weight: batch of balanced weights have shape [batch, H, W, 1]
         :param sup: use side supervision or not
+        :param acc_count: the number of gradients needed to accumulate before applying optimization method
+        :param global_step: keep tracking of global training step
         :return: a tf.Tensor scalar, a train op
         '''
 
@@ -207,11 +209,11 @@ class ResNet():
         # pred_out = pred_out[:,:,:,1:2]
         tf.summary.image('pred', tf.cast(tf.nn.softmax(pred_out)[:,:,:,1:2], tf.float16))
 
-        # TODO: manually apply gradients
-        train_step = tf.train.AdamOptimizer(self._init_lr).minimize(total_loss)
+        train_step, grad_acc_op = self._optimize(total_loss, acc_count, global_step)
+        #train_step = tf.train.AdamOptimizer(self._init_lr).minimize(total_loss)
         print("Model built.")
 
-        return total_loss, train_step
+        return total_loss, train_step, grad_acc_op
 
     def test(self, images):
         '''
@@ -272,6 +274,37 @@ class ResNet():
         side_total = 0.5 * side_2_loss + 0.5 * side_4_loss + 0.5 * side_8_loss + 0.5 * side_16_loss
 
         return side_total
+
+    def _optimize(self, loss, acc_count, global_step):
+        '''
+        :param loss: the network loss
+        :return: a train op, a grad_acc_op
+        '''
+
+        optimizer = tf.train.AdamOptimizer(self._init_lr)
+        grads_vars = optimizer.compute_gradients(loss)
+
+        # create grad accumulator for each variable-grad pair
+        grad_accumulator = {}
+        for idx in range(len(grads_vars)):
+            if grads_vars[idx][0] is not None:
+                grad_accumulator[idx] = tf.ConditionalAccumulator(grads_vars[idx][0].dtype)
+        # apply gradient to each grad accumulator
+        layer_lr = nn.param_lr()
+        grad_accumulator_op = []
+        for var_idx, grad_acc in grad_accumulator.iteritems():
+            var_name = str(grads_vars[var_idx][1].name).split(':')[0]
+            var_grad = grads_vars[var_idx][0]
+            grad_accumulator_op.append(grad_acc.apply_grad(var_grad * layer_lr[var_name], local_step=global_step))
+        # take average gradients for each variable after accumulating count reaches
+        mean_grads_vars = []
+        for var_idx, grad_acc in grad_accumulator.iteritems():
+            mean_grads_vars.append(grad_acc.take_grad(acc_count), grads_vars[var_idx][1])
+
+        # apply average gradients to variables
+        update_op = optimizer.apply_gradients(mean_grads_vars, global_step=global_step)
+
+        return update_op, grad_accumulator_op
 
     # def  _flatten_logits(self, input_tensor):
     #     '''

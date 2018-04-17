@@ -19,17 +19,17 @@ config_gpu.gpu_options.per_process_gpu_memory_fraction = 0.95
 # config dataset params (3 datasets with different scales)
 params_data50 = {
     'mode': 'parent_train_binary',
-    'batch': 2,
+    'batch': 1,
     'tfrecord': '/work/wangyu/davis_train_50.tfrecord'
 }
 params_data80 = {
     'mode': 'parent_train_binary',
-    'batch': 2,
+    'batch': 1,
     'tfrecord': '/work/wangyu/davis_train_80.tfrecord'
 }
 params_data100 = {
     'mode': 'parent_train_binary',
-    'batch': 2,
+    'batch': 1,
     'tfrecord': '/work/wangyu/davis_train_100.tfrecord'
 }
 with tf.device('/cpu:0'):
@@ -46,26 +46,27 @@ with tf.device('/cpu:0'):
 
 # config train params
 params_model = {
-    'batch': 2,
+    'batch': 1,
     'l2_weight': 0.0002,
     'init_lr': 1e-5, # original paper: 1e-8,
     'base_decay': 1.0,
     'sup_decay': 0.1,
     'fuse_decay': 0.01,
     'data_format': 'NCHW', # optimal for cudnn
-    'save_path': '../data/ckpts/parent-sup/parent_binary_train.ckpt',
-    'tsboard_logs': '../data/tsboard_logs/parent-sup/',
+    'save_path': '../data/ckpts/parent-sup-no-bn/parent_binary_train.ckpt',
+    'tsboard_logs': '../data/tsboard_logs/parent-sup-no-bn/',
     'restore_imgnet': '../data/ckpts/imgnet.ckpt', # restore model from where
     'restore_parent_bin': '../data/ckpts/parent_binary_train.ckpt-xxx'
 }
 # define epochs
-epochs = 5
+epochs = 10
 num_frames = 4209 * 3
 steps_per_epochs = int(num_frames / params_model['batch'])
-global_step = 0
+global_step = tf.Variable(0, name='global_step', trainable=False) # incremented automatically by 1 after each apply_gradients
+acc_count = 10
 save_ckpt_interval = 6000
-summary_write_interval = 50 # 50
-print_screen_interval = 20
+summary_write_interval = 5 # 50
+print_screen_interval = 5 # 20
 
 # display traning images/gts
 feed_img = next_batch['img']
@@ -77,7 +78,7 @@ sum_weight = tf.summary.image('input_weight', tf.cast(feed_weight, tf.float16))
 
 # build network, on GPU by default
 model = resnet.ResNet(params_model)
-loss, step = model.train(feed_img, feed_gt, feed_weight, 1)
+loss, step, grad_acc_op = model.train(feed_img, feed_gt, feed_weight, 1, acc_count, global_step)
 init_op = tf.global_variables_initializer()
 sum_all = tf.summary.merge_all()
 
@@ -103,40 +104,47 @@ with tf.Session(config=config_gpu) as sess:
     print('All weights initialized.')
 
     # each step choose a random scale/dataset for training
-    print("Starting training for {0} epochs, {1} global steps.".format(epochs, num_frames*epochs))
+    print("Starting training for {0} epochs, {1} global steps.".format(epochs, steps_per_epochs*epochs))
     for ep in range(epochs):
         print("Epoch {} ...".format(ep))
         for local_step in range(steps_per_epochs):
 
-            # randomly choose image scales from [0.5, 0.8, 1.0]
-            rand_v = np.random.rand()
-            train_scale = 0
-            if rand_v <= 0.33:
-                feed_dict_v = {handle: iter_50_handle}
-            elif rand_v <= 0.66:
-                feed_dict_v = {handle: iter_80_handle}
-            else:
-                feed_dict_v = {handle: iter_100_handle}
+            # accumulate gradients
+            for _ in range(acc_count):
 
-            # execute back_prop
-            loss_, step_, sum_all_ = sess.run([loss, step, sum_all], feed_dict=feed_dict_v)
+                # randomly choose image scales from [0.5, 0.8, 1.0]
+                rand_v = np.random.rand()
+                train_scale = 0
+                if rand_v <= 0.33:
+                    feed_dict_v = {handle: iter_50_handle}
+                elif rand_v <= 0.66:
+                    feed_dict_v = {handle: iter_80_handle}
+                else:
+                    feed_dict_v = {handle: iter_100_handle}
+
+                # execute
+                run_result = sess.run([loss, sum_all] + grad_acc_op, feed_dict=feed_dict_v)
+                loss_ = run_result[0]
+                sum_all_ = run_result[1]
+
+            # apply gradient and update all parameters, this will increment global_step by 1 automatically
+            sess.run(step)
 
             # save summary
-            if global_step % summary_write_interval == 0 and global_step !=0:
-                sum_writer.add_summary(sum_all_, global_step)
+            if global_step.eval() % summary_write_interval == 0 and global_step.eval() !=0:
+                sum_writer.add_summary(sum_all_, global_step.eval())
 
             # print out loss to screen
-            if global_step % print_screen_interval == 0:
-                print("Global step {0} loss: {1}".format(global_step, loss_))
+            if global_step.eval() % print_screen_interval == 0:
+                print("Global step {0} loss: {1}".format(global_step.eval(), loss_))
 
             # save .ckpt
-            if global_step % save_ckpt_interval == 0 and global_step != 0:
+            if global_step.eval() % save_ckpt_interval == 0 and global_step.eval() != 0:
                 saver_parent.save(sess=sess,
                            save_path = params_model['save_path'],
                            global_step=global_step,
                            write_meta_graph=False)
                 print('Saved checkpoint.')
-            global_step += 1
 
     print("Finished training.")
 
