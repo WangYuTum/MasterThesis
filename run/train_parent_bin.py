@@ -16,55 +16,40 @@ os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 config_gpu = tf.ConfigProto()
 config_gpu.gpu_options.per_process_gpu_memory_fraction = 0.95
 
-# config dataset params (3 datasets with different scales)
-params_data50 = {
-    'mode': 'parent_train_binary',
-    'batch': 2,
-    'tfrecord': '/work/wangyu/davis_train_50.tfrecord'
+# config dataset params
+params_data = {
+    'mode': 'train_contour',
+    'batch': 1,
+    'tfrecord': '/work/wangyu/PASCAL_Context_train.tfrecord'
 }
-params_data80 = {
-    'mode': 'parent_train_binary',
-    'batch': 2,
-    'tfrecord': '/work/wangyu/davis_train_80.tfrecord'
-}
-params_data100 = {
-    'mode': 'parent_train_binary',
-    'batch': 2,
-    'tfrecord': '/work/wangyu/davis_train_100.tfrecord'
-}
+
 with tf.device('/cpu:0'):
-    dataset_50 = DAVIS_dataset(params_data50)
-    dataset_80 = DAVIS_dataset(params_data80)
-    dataset_100 = DAVIS_dataset(params_data100)
-    iter_50 = dataset_50.get_iterator()
-    iter_80 = dataset_80.get_iterator()
-    iter_100 = dataset_100.get_iterator()
-    handle = tf.placeholder(tf.string, shape=[])
-    iterator = tf.contrib.data.Iterator.from_string_handle(handle, iter_50.output_types)
-    next_batch = iterator.get_next()
+    dataset = DAVIS_dataset(params_data)
+    next_batch = dataset.next_batch()
 
 
 # config train params
 params_model = {
-    'batch': 2,
+    'batch': 1,
     'l2_weight': 0.0002,
     'init_lr': 1e-5, # original paper: 1e-8,
     'base_decay': 1.0,
     'sup_decay': 0.1,
     'fuse_decay': 0.01,
     'data_format': 'NCHW', # optimal for cudnn
-    'save_path': '../data/ckpts/parent-sup/parent_binary_train.ckpt',
-    'tsboard_logs': '../data/tsboard_logs/parent-sup/',
+    'save_path': '../data/ckpts/generic_contours/parent-sup-no-bn/parent_binary_train.ckpt',
+    'tsboard_logs': '../data/tsboard_logs/generic_contours/parent-sup-no-bn/',
     'restore_imgnet': '../data/ckpts/imgnet.ckpt', # restore model from where
-    'restore_parent_bin': '../data/ckpts/parent_binary_train.ckpt-xxx'
+    'restore_parent_bin': '../data/ckpts/generic_contours/parent_binary_train.ckpt-xxx'
 }
 # define epochs
 epochs = 5
-num_frames = 4209 * 3
-steps_per_epochs = int(num_frames / params_model['batch'])
-global_step = 0
-save_ckpt_interval = 6000
-summary_write_interval = 50 # 50
+num_train = 5000
+steps_per_epochs = int(num_train / params_model['batch'])
+global_step = tf.Variable(0, name='global_step', trainable=False) # incremented automatically by 1 after each apply_gradients
+acc_count = 10
+save_ckpt_interval = 5000
+summary_write_interval = 50
 print_screen_interval = 20
 
 # display traning images/gts
@@ -77,7 +62,7 @@ sum_weight = tf.summary.image('input_weight', tf.cast(feed_weight, tf.float16))
 
 # build network, on GPU by default
 model = resnet.ResNet(params_model)
-loss, step = model.train(feed_img, feed_gt, feed_weight)
+loss, step, grad_acc_op = model.train(feed_img, feed_gt, feed_weight, 1, acc_count, global_step)
 init_op = tf.global_variables_initializer()
 sum_all = tf.summary.merge_all()
 
@@ -89,9 +74,6 @@ saver_parent = tf.train.Saver()
 with tf.Session(config=config_gpu) as sess:
     sum_writer = tf.summary.FileWriter(params_model['tsboard_logs'], sess.graph)
     sess.run(init_op)
-    iter_50_handle = sess.run(iter_50.string_handle())
-    iter_80_handle = sess.run(iter_80.string_handle())
-    iter_100_handle = sess.run(iter_100.string_handle())
 
     # restore all variables
     saver_img.restore(sess, params_model['restore_imgnet'])
@@ -103,44 +85,34 @@ with tf.Session(config=config_gpu) as sess:
     print('All weights initialized.')
 
     # each step choose a random scale/dataset for training
-    print("Starting training for {0} epochs, {1} global steps.".format(epochs, num_frames*epochs))
+    print("Starting training for {0} epochs, {1} global steps.".format(epochs, num_train*epochs))
     for ep in range(epochs):
         print("Epoch {} ...".format(ep))
         for local_step in range(steps_per_epochs):
 
-            # randomly choose image scales from [0.5, 0.8, 1.0]
-            rand_v = np.random.rand()
-            train_scale = 0
-            if rand_v <= 0.33:
-                feed_dict_v = {handle: iter_50_handle}
-            elif rand_v <= 0.66:
-                feed_dict_v = {handle: iter_80_handle}
-            else:
-                feed_dict_v = {handle: iter_100_handle}
+            # accumulate gradients
+            for _ in range(acc_count):
+                run_result = sess.run([loss, sum_all] + grad_acc_op)
+                loss_ = run_result[0]
+                sum_all_ = run_result[1]
 
-            # execute back_prop
-            loss_, step_, sum_all_ = sess.run([loss, step, sum_all], feed_dict=feed_dict_v)
+            # apply gradient and update all parameters, this will increment global_step by 1 automatically
+            sess.run(step)
 
             # save summary
-            if global_step % summary_write_interval == 0 and global_step !=0:
-                sum_writer.add_summary(sum_all_, global_step)
+            if global_step.eval() % summary_write_interval == 0 and global_step.eval() !=0:
+                sum_writer.add_summary(sum_all_, global_step.eval())
 
             # print out loss to screen
-            if global_step % print_screen_interval == 0:
-                print("Global step {0} loss: {1}".format(global_step, loss_))
+            if global_step.eval() % print_screen_interval == 0:
+                print("Global step {0} loss: {1}".format(global_step.eval(), loss_))
 
             # save .ckpt
-            if global_step % save_ckpt_interval == 0 and global_step != 0:
+            if global_step.eval() % save_ckpt_interval == 0 and global_step.eval() != 0:
                 saver_parent.save(sess=sess,
                            save_path = params_model['save_path'],
                            global_step=global_step,
                            write_meta_graph=False)
                 print('Saved checkpoint.')
-            global_step += 1
 
     print("Finished training.")
-
-
-
-
-
