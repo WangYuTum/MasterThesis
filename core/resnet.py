@@ -299,7 +299,7 @@ class ResNet():
         # take average gradients for each variable after accumulating count reaches
         mean_grads_vars = []
         for var_idx, grad_acc in grad_accumulator.iteritems():
-            mean_grads_vars.append(grad_acc.take_grad(acc_count), grads_vars[var_idx][1])
+            mean_grads_vars.append((grad_acc.take_grad(acc_count), grads_vars[var_idx][1]))
 
         # apply average gradients to variables
         update_op = optimizer.apply_gradients(mean_grads_vars, global_step=global_step)
