@@ -1,13 +1,17 @@
 '''
     The data pipeline for DAVIS encapsulated as a class object.
 
-    NOTE: the code is still under developing.
+    NOTE: The code/branch is only used for training a generic contour capturing network.
+    The resulting inference/weights may be used for DAVIS specific tasks, such as: full-scene contour prediction,
+    primary-obj-contour capturing, etc.
 
     DONE:
-        * Pipeline for training parent network using binary mask
-        * Pipeline for fine-tuning/inference parent network using binary mask
-    TODO:
-        * Pipeline for val/test fine-tune/inference on multi-object mask
+        * Pipeline for training parent network using binary contour
+        * Pipeline for inference generic contours on PASCAL Context
+    TODO(under developing):
+        * Pipeline for inference generic contours on DAVIS dataset
+        * Get/sort image indices for inference DAVIS contours
+
 '''
 
 # NOTE: The .tfrecord files are located on /work/wangyu/ on hpccremers4
@@ -31,10 +35,10 @@ class DAVIS_dataset():
     def __init__(self, params):
         '''
         :param params(dict) keys:
-            mode: 'parent_train_binary'-train network with independent frames
-                  'parent_finetune_binary'-finetune network with 1st annotation of the seq
-            seq_path: only used in mode 'parent_finetune_binary', e.g. 'DAVIS_root/JPEGImages/480p/bike-packing'
-            batch:  2
+            mode: 'train_contour'-train network with independent frames
+                  'inf_PASCAL_val_contour'-inference on PASCAL Context val dataset
+                  'inf_DAVIS_contour'-inference on DAVIS train/val/test datasets
+            batch:  1
             tfrecord: None
         '''
 
@@ -42,41 +46,30 @@ class DAVIS_dataset():
         self._mode = params.get('mode', None)
         self._batch = int(params.get('batch', 0))
         self._tfrecord = params.get('tfrecord', None)
-        self._seq_path = params.get('seq_path', None)
-        self._dataset = None # only used in mode 'parent_train_binary'
-        self._scale = 100 # in percentage
-        self._map_threads = self._batch * 2
-        self._map_buffer = self._batch * 4
-        self._seq = None # only used in mode 'parent_finetune_binary'
-        self._data_mean = np.array([115.195829334, 114.927476686, 107.725750308]).reshape((1,1,3))
-        self._data_std = np.array([64.5572961827, 63.0172054007, 67.0494050908]).reshape((1,1,3))
+        self._dataset = None
+        self._map_threads = self._batch * 4
+        self._map_buffer = self._batch * 8
+        # the mean/std are computed over PASCAL Context trainval sets
+        self._data_mean = np.array([116.737144764, 111.800790818, 103.241458398]).reshape((1,1,3))
+        self._data_std = np.array([69.8958826812, 69.1125806592, 72.5705461484]).reshape((1,1,3))
 
         # params check
         if self._mode is None:
             sys.exit("Must specify a mode.")
-        if self._mode == 'parent_finetune_binary':
-            if self._seq_path is None:
-                sys.exit("Must specify a seq_path in mode {}".format(self._mode))
-        if self._mode == 'parent_train_binary' and self._batch == 0:
-            sys.exit("Must specify a batch size in mode {}".format(self._mode))
-        if self._mode == 'parent_train_binary':
-            if self._tfrecord is None:
-                sys.exit("Must specify a path to .tfrecord file in mode {}".format(self._mode))
-            else:
-                self._scale = int(self._tfrecord.split("_")[2].split(".")[0])
+        if self._batch == 0:
+            sys.exit("Must specify a batch size.")
+        if self._tfrecord is None:
+            sys.exit("Must specify a path to .tfrecord file.")
 
         # Build up the pipeline
-        if self._mode == 'parent_train_binary':
+        if self._mode == 'train_contour' or \
+                self._mode == 'inf_PASCAL_val_contour' or \
+                self._mode == 'inf_DAVIS_contour':
             self._dataset = self._build_pipeline()
-        elif self._mode == 'parent_finetune_binary':
-            self._seq = self._get_seq_frames()
-            print('Got {0} frames for seq {1}'.format(len(self._seq), self._seq_path))
         else:
             sys.exit("Not supported mode.")
-        if self._mode == 'parent_train_binary' and self._dataset is None:
-            sys.exit("Data pipeline not built in mode {}".format(self._mode))
-        if self._mode == 'parent_finetune_binary' and self._seq is None:
-            sys.exit("Seq {0} data not restored in mode {1}".format(self._seq_path, self._mode))
+        if self._dataset is None:
+            sys.exit("Data pipeline build failed.")
 
     def _parse_single_record(self, record):
         '''
@@ -85,24 +78,35 @@ class DAVIS_dataset():
         '''
 
         # TFrecords format for DAVIS binary annotation dataset
-        if self._mode == 'parent_train_binary':
-            img_H = int(480 * self._scale / 100)
-            img_W = int(854 * self._scale / 100)
+        if self._mode == 'train_contour' or self._mode == 'inf_PASCAL_val_contour':
             record_features = {
-                "img": tf.FixedLenFeature([img_H,img_W,3], tf.int64),
-                "gt": tf.FixedLenFeature([img_H,img_W,1], tf.int64),
-                "boundary": tf.FixedLenFeature([img_H,img_W,1], tf.int64),
+                "img": tf.FixedLenFeature([500*500, ], tf.int64),
+                "gt": tf.FixedLenFeature([500*500, ], tf.int64),
+                "xx": tf.FixedLenFeature([1, ], tf.int64),
+                "yy": tf.FixedLenFeature([1, ], tf.int64),
             }
+        elif self._mode == 'inf_DAVIS_contour':
+            # TODO
+            pass
         else:
             sys.exit("Current mode not supported.")
 
         data_dict = {}
         out_data = tf.parse_single_example(serialized=record, features=record_features)
 
-        # Cast RGB pixels to tf.float32, gt to tf.int32
-        data_dict['img'] = tf.cast(out_data['img'], tf.float32)
-        data_dict['gt'] = tf.cast(out_data['gt'], tf.int32)
-        data_dict['boundary'] = tf.cast(out_data['boundary'], tf.int32)
+        if self._mode == 'train_contour' or self._mode == 'inf_PASCAL_val_contour':
+            xx = np.reshape(out_data['xx'], ())
+            yy = np.reshape(out_data['yy'], ())
+            size_true = xx * yy
+            img_flat = out_data['img'][:size_true]
+            gt_flat = out_data['gt'][:size_true]
+            data_dict['img'] = tf.cast(np.reshape(img_flat, (xx, yy)), tf.float32)
+            data_dict['gt'] = tf.cast(np.reshape(gt_flat, (xx, yy)), tf.int32)
+            data_dict['xx'] = tf.cast(xx, tf.int32)
+            data_dict['yy'] = tf.cast(yy, tf.int32)
+        elif self._mode == 'inf_DAVIS_contour':
+            # TODO
+            pass
 
         return data_dict
 
@@ -119,143 +123,134 @@ class DAVIS_dataset():
         tranformed = {}
         tranformed['img'] = rgb_img
         tranformed['gt'] = example['gt']
-        tranformed['boundary'] = example['boundary']
+        if self._mode == 'train_contour' or self._mode == 'inf_PASCAL_val_contour':
+            tranformed['xx'] = example['xx']
+            tranformed['yy'] = example['yy']
+        elif self._mode == 'inf_DAVIS_contour':
+            # TODO
+            pass
 
         return tranformed
 
-    def _parent_binary_train_transform(self, example):
+    def _train_contour_transform(self, example):
         '''
         :param example: a standardized dict
         :return: a dict where rgb/gt is transformed
 
         Transformations:
             - Randomly flip img/gt together
+            - Randomly resize img/gt together, ratio: [0.7, 1.3]
         '''
 
         # get weight matrix for balanced_cross_entropy loss
         num_pos = tf.reduce_sum(example['gt'])
-        num_neg = tf.reduce_sum(1-example['gt'])
+        num_neg = tf.reduce_sum(1 - example['gt'])
         num_total = num_pos + num_neg
-
         weight_pos = tf.cast(num_neg, tf.float32) / tf.cast(num_total, tf.float32)
         weight_neg = 1.0 - weight_pos
-
         mat_pos = tf.multiply(tf.cast(example['gt'], tf.float32), weight_pos)
-        mat_neg = tf.multiply(tf.cast(1-example['gt'], tf.float32), weight_neg)
+        mat_neg = tf.multiply(tf.cast(1 - example['gt'], tf.float32), weight_neg)
         mat_weight = tf.add(mat_pos, mat_neg)
 
+        # stack and randomly flip
         gt = tf.cast(example['gt'], tf.float32)
-        boundary = tf.cast(example['boundary'], tf.float32)
-        stacked = tf.concat([example['img'], gt, mat_weight, boundary], axis=-1) # shape: [H, W, 6]
+        stacked = tf.concat([example['img'], gt, mat_weight], axis=-1)  # shape: [H, W, 5]
         stacked = tf.image.random_flip_left_right(stacked)
 
-        # Pack the result
-        image = stacked[:,:,0:3]
-        gt = tf.cast(stacked[:,:,3:4], tf.int32)
-        balanced_mat = stacked[:,:,4:5]
-        boundary = tf.cast(stacked[:,:,5:6], tf.int32)
+        # unstack and randomly resize
+        image = stacked[:,:,0:3] # tf.float32
+        gt = tf.cast(stacked[:, :, 3:4], tf.int32) # tf.int32
+        balanced_mat = stacked[:, :, 4:5] # tf.float32
+        [ratio] = np.random.randint(7, 13, 1)
+        new_xx = tf.cast(example['xx']*ratio/10, tf.int32)
+        new_yy = tf.cast(example['yy']*ratio/10, tf.int32)
+        new_size = [new_xx, new_yy]
+        image = tf.image.resize_images(image, new_size, tf.image.ResizeMethod.BILINEAR)
+        gt = tf.image.resize_images(gt, new_size, tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+        balanced_mat = tf.image.resize_images(balanced_mat, new_size, tf.image.ResizeMethod.BILINEAR)
+
+        # pack result
         transformed = {}
         transformed['img'] = image
         transformed['gt'] = gt
         transformed['balanced_mat'] = balanced_mat
-        transformed['boundary'] = boundary
 
-        return  transformed
+        return transformed
 
-    def _build_parent_binary_pipeline(self, tfrecord_file):
+    def _build_train_contour_pipeline(self, tfrecord_file):
         '''
-        :param tfrecord_file: .tfrecord file path, comes from self._tfrecord
+        :param tfrecord_file:
         :return: a tf.contrib.dataset object
 
         NOTE: The .tfrecord is compressed as "GZIP"
         '''
         dataset = tf.contrib.data.TFRecordDataset(tfrecord_file, "GZIP")
         dataset = dataset.repeat()
-        dataset = dataset.map(self._parse_single_record, num_threads=self._map_threads, output_buffer_size=self._map_buffer)
+        dataset = dataset.map(self._parse_single_record, num_threads=self._map_threads,
+                              output_buffer_size=self._map_buffer)
         dataset = dataset.map(self._image_std, num_threads=self._map_threads, output_buffer_size=self._map_buffer)
-        dataset = dataset.map(self._parent_binary_train_transform, num_threads=self._map_threads, output_buffer_size=self._map_buffer)
+        dataset = dataset.map(self._train_contour_transform, num_threads=self._map_threads,
+                              output_buffer_size=self._map_buffer)
         dataset = dataset.shuffle(buffer_size=1500)
         dataset = dataset.batch(self._batch)
 
-        return  dataset
+        return dataset
 
-    def _build_pipeline(self):
+    def _build_inf_pascal_pipeline(self, tfrecord_file):
+        '''
+        :param tfrecord_file:
+        :return: a tf.contrib.dataset object
 
-        if self._mode == 'parent_train_binary':
-            dataset = self._build_parent_binary_pipeline(tfrecord_file=self._tfrecord)
-            print("Train_parent_binary pipeline built. Load tfrecord: {}".format(self._tfrecord))
-        else:
-            sys.exit("Not supported mode.")
+        NOTE: The .tfrecord is compressed as "GZIP"
+        '''
+        dataset = tf.contrib.data.TFRecordDataset(tfrecord_file, "GZIP")
+        dataset = dataset.map(self._parse_single_record, num_threads=self._map_threads,
+                              output_buffer_size=self._map_buffer)
+        dataset = dataset.map(self._image_std, num_threads=self._map_threads, output_buffer_size=self._map_buffer)
+        dataset = dataset.batch(self._batch)
 
         return dataset
 
-    def get_iterator(self):
-
-        iter = self._dataset.make_one_shot_iterator()
-
-        return iter
-
-    ## The following functions are not using .tfrecord.
-    ## They are mainly used on seq-by-seq train/fine-tune.
-    ## The data are read from disk and stored in main memory for the whole life of the model.
-
-    def _get_seq_frames(self):
+    def _build_inf_davis_pipeline(self, tfrecord_file):
         '''
-        Example self._seq_path: 'DAVIS_root/JPEGImages/480p/bike-packing'
-        :return: A list of numpy image arrays
+        :param tfrecord_file:
+        :return: a tf.contrib.dataset object
 
-        NOTE: the returned frames are standardized
+        NOTE: The .tfrecord is compressed as "GZIP"
         '''
-        seq_frames = []
-        search_seq_imgs = os.path.join(self._seq_path, "*.jpg")
-        files_seq = glob.glob(search_seq_imgs)
-        files_seq.sort()
-        num_frames = len(files_seq)
-        if num_frames == 0:
-            sys.exit("Got no frames for seq {}".format(self._seq_path))
-        for i in range(num_frames):
-            frame = np.array(Image.open(files_seq[i])).astype(np.float32)
-            # stardardize
-            frame -= self._data_mean
-            frame /= self._data_std
-            seq_frames.append(frame)
+        dataset = tf.contrib.data.TFRecordDataset(tfrecord_file, "GZIP")
+        dataset = dataset.map(self._parse_single_record, num_threads=self._map_threads,
+                              output_buffer_size=self._map_buffer)
+        dataset = dataset.map(self._image_std, num_threads=self._map_threads, output_buffer_size=self._map_buffer)
+        dataset = dataset.batch(self._batch)
 
-        return seq_frames
+        return dataset
 
-    def get_one_shot_pair(self):
+    def _build_pipeline(self):
+
+        if self._mode == 'train_contour':
+            dataset = self._build_train_contour_pipeline(tfrecord_file=self._tfrecord)
+            print("train_contour pipeline built. Loaded tfrecord: {}".format(self._tfrecord))
+        elif self._mode == 'inf_PASCAL_val_contour':
+            dataset = self._build_inf_pascal_pipeline(tfrecord_file=self._tfrecord)
+            print("inf_PASCAL_val_contour pipeline built. Loaded tfrecord: {}".format(self._tfrecord))
+        elif self._mode == 'inf_DAVIS_contour':
+            dataset = self._build_inf_davis_pipeline(tfrecord_file=self._tfrecord)
+            print("inf_DAVIS_contour pipeline built. Loaded tfrecord: {}".format(self._tfrecord))
+        else:
+            sys.exit('Mode not supported.')
+
+        return dataset
+
+    def next_batch(self):
         '''
-        :return: [img, gt, weight] for the one-shot fine-tuning of the self._seq
+        :return: a dict:
+            * next_batch['img'] = [batch_size, H, W, 3], tf.float32
+            * next_batch['gt'] = [batch_size, H, W, 1], tf.int32, binary
         '''
-        pair = []
-        pair.append(self._seq[0])
+        batch_iterator = self._dataset.make_one_shot_iterator()
+        next_batch = batch_iterator.get_next()
 
-        gt_path = os.path.join(self._seq_path.replace('JPEGImages','Annotations'), '00000.png')
-        gt = np.array(Image.open(gt_path), dtype=np.int8)
-        # convert to binary
-        gt_bool = np.greater(gt, 0)
-        gt_bin = gt_bool.astype(np.uint8)
-
-        gt = np.expand_dims(gt_bin, axis=-1) # [H,W,1]
-        pair.append(gt)
-
-        # Compute balanced weight for training, [H,W,1]
-        num_pos = np.sum(gt)
-        num_neg = np.sum(1-gt)
-        num_total = num_pos + num_neg
-        weight_pos = num_neg.astype(np.float32) / num_total.astype(np.float32)
-        weight_neg = 1.0 - weight_pos
-        mat_pos = np.multiply(gt.astype(np.float32), weight_pos)
-        mat_neg = np.multiply((1.0-gt).astype(np.float32), weight_neg)
-        mat_weight = np.add(mat_pos, mat_neg)
-        pair.append(mat_weight)
-
-        return pair
-
-    def get_test_frames(self):
-
-        frame_list = self._seq[1:]
-
-        return frame_list
-
+        return next_batch
 
 
