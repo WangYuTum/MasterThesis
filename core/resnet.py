@@ -3,11 +3,9 @@
 
     NOTE: the code is still under developing.
     TODO:
-        ** apply diff lr to diff layers
         * padding in deconv layer: used SAME-osvos. consider VALID suggested from online_tutorial ?
         * bias layers: added on side path. on backbone net?
         * Learning rate scheduler
-        * Estimator ...
 '''
 
 from __future__ import division

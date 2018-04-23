@@ -69,17 +69,20 @@ if FINE_TUNE == 1:
         'data_format': 'NCHW', # optimal for cudnn
         'save_path': '../data/ckpts/fine-tune/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt',
         'tsboard_logs': '../data/tsboard_logs/fine-tune/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1],
-        'restore_parent_bin': '../data/ckpts/parent-sup/parent_binary_train.ckpt-30000'
+        'restore_parent_bin': '../data/ckpts/parent-sup-no-bn/parent_binary_train.ckpt-90000'
     }
     global_iters = 500 # original paper: 500
     save_ckpt_interval = 500
     summary_write_interval = 10
     print_screen_interval = 10
+    acc_count = 1 # since only fine-tune on single image
+    global_step = tf.Variable(0, name='global_step',
+                              trainable=False)  # incremented automatically by 1 after each apply_gradients
 else:
     params_model = {
         'batch': 1,
         'data_format': 'NCHW',  # optimal for cudnn
-        'restore_fine-tune_bin': '../data/ckpts/fine-tune/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt-500',
+        'restore_fine-tune_bin': '../data/ckpts/fine-tune/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt-90500',
         'save_result_path': '../data/results/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]
     }
 
@@ -92,7 +95,7 @@ if FINE_TUNE == 1:
 # build network, on GPU by default
 model = resnet.ResNet(params_model)
 if FINE_TUNE == 1:
-    loss, step = model.train(feed_img, feed_one_shot_gt, feed_one_shot_weight, SUP)
+    loss, step, grad_acc_op = model.train(feed_img, feed_one_shot_gt, feed_one_shot_weight, SUP, acc_count, global_step)
     init_op = tf.global_variables_initializer()
     sum_all = tf.summary.merge_all()
     # define Saver
@@ -134,17 +137,24 @@ with tf.Session(config=config_gpu) as sess:
             feed_one_shot_weight: train_gt_weight[2][np.newaxis,:]
         }
         for iter_step in range(global_iters):
-            loss_, step_, sum_all_ = sess.run([loss, step, sum_all], feed_dict=feed_dict_v)
-            if iter_step % summary_write_interval == 0:
-                sum_writer.add_summary(sum_all_, iter_step)
-            if iter_step % print_screen_interval == 0:
-                print("Fine-tune step {0} loss: {1}".format(iter_step, loss_))
-            if (iter_step+1) % save_ckpt_interval == 0 and iter_step != 0:
+            # acc gradient
+            for _ in range(acc_count):
+                run_result = sess.run([loss, sum_all] + grad_acc_op, feed_dict=feed_dict_v)
+                loss_ = run_result[0]
+                sum_all_ = run_result[1]
+            # execute BP
+            sess.run(step)
+
+            if global_step.eval() % summary_write_interval == 0:
+                sum_writer.add_summary(sum_all_, global_step.eval())
+            if global_step.eval() % print_screen_interval == 0:
+                print("Fine-tune step {0} loss: {1}".format(global_step.eval(), loss_))
+            if global_step.eval() % save_ckpt_interval == 0 and global_step.eval() != 0:
                 saver_fine_tune.save(sess=sess,
                                      save_path=params_model['save_path'],
-                                     global_step=iter_step+1,
+                                     global_step=global_step,
                                      write_meta_graph=False)
-                print('Saved checkpoint at iter {}'.format(iter_step+1))
+                print('Saved checkpoint at iter {}'.format(global_step.eval()))
         print("Finished fine-tuning.")
 
     else:
