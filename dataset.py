@@ -80,8 +80,8 @@ class DAVIS_dataset():
         # TFrecords format for DAVIS binary annotation dataset
         if self._mode == 'train_contour' or self._mode == 'inf_PASCAL_val_contour':
             record_features = {
-                "img": tf.FixedLenFeature([500*500, ], tf.int64),
-                "gt": tf.FixedLenFeature([500*500, ], tf.int64),
+                "img": tf.FixedLenFeature([500*500*3, ], tf.int64),
+                "gt": tf.FixedLenFeature([500*500*1, ], tf.int64),
                 "xx": tf.FixedLenFeature([1, ], tf.int64),
                 "yy": tf.FixedLenFeature([1, ], tf.int64),
             }
@@ -95,13 +95,15 @@ class DAVIS_dataset():
         out_data = tf.parse_single_example(serialized=record, features=record_features)
 
         if self._mode == 'train_contour' or self._mode == 'inf_PASCAL_val_contour':
-            xx = np.reshape(out_data['xx'], ())
-            yy = np.reshape(out_data['yy'], ())
+            xx = tf.reshape(out_data['xx'], [])
+            yy = tf.reshape(out_data['yy'], [])
+            xx = tf.cast(xx, tf.int32)
+            yy = tf.cast(yy, tf.int32)
             size_true = xx * yy
-            img_flat = out_data['img'][:size_true]
+            img_flat = out_data['img'][:size_true*3]
             gt_flat = out_data['gt'][:size_true]
-            data_dict['img'] = tf.cast(np.reshape(img_flat, (xx, yy)), tf.float32)
-            data_dict['gt'] = tf.cast(np.reshape(gt_flat, (xx, yy)), tf.int32)
+            data_dict['img'] = tf.cast(tf.reshape(img_flat, [xx, yy, 3]), tf.float32)
+            data_dict['gt'] = tf.cast(tf.reshape(gt_flat, [xx, yy, 1]), tf.int32)
             data_dict['xx'] = tf.cast(xx, tf.int32)
             data_dict['yy'] = tf.cast(yy, tf.int32)
         elif self._mode == 'inf_DAVIS_contour':

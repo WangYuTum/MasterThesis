@@ -84,7 +84,7 @@ def _int64_feature(value):
 def write_single_record(record_writer, data_pair):
     xx = np.array([data_pair[0].shape[0]], np.int32)
     yy = np.array([data_pair[0].shape[1]], np.int32)
-    img_paded = np.concatenate((data_pair[0].flatten(), np.zeros(max_x*max_y - xx*yy, np.uint8)))
+    img_paded = np.concatenate((data_pair[0].flatten(), np.zeros(max_x*max_y*3 - xx*yy*3, np.uint8)))
     gt_paded = np.concatenate((data_pair[1].flatten(), np.zeros(max_x*max_y - xx*yy, np.uint8)))
     example = tf.train.Example(features=tf.train.Features(feature={
         'img': _int64_feature(img_paded),
