@@ -1,3 +1,10 @@
+# - The Attention_bin branch train a model using sequences with binary object mask.
+# - The model parameters (CNN part) are init from Master branch (generic objectness), other parameters
+# are randomly init.
+# - The model takes batch of 2 sequences for now. No batch_norm. Add batch_norm after success.
+# - The shorter sequence is padded with zeros.
+
+
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
