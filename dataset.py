@@ -1,16 +1,36 @@
 '''
-    The data pipeline for DAVIS encapsulated as a class object.
+    The data pipeline for DAVIS single object attention network.
 
-    NOTE: the code is still under developing.
+    Goal: loading all frames into memory and randomly choose one sequence during training
 
-    DONE:
-        * Pipeline for training parent network using binary mask
-        * Pipeline for fine-tuning/inference parent network using binary mask
-    TODO:
-        * Pipeline for val/test fine-tune/inference on multi-object mask
+    Implementation Note: Video frames stored as a list of list:
+        - Images: [seq0, seq1, ...], where seqx = [img0, img1, ...]
+        - GTs: [seq0, seq1, ...]
+            - where seqx = [gt0, gt1, ...] for train data
+            - where seqx = gtx for val data
+        - All gts are converted to binary mask
+        - Images in np.uint8, GTs in np.uint8 for memory efficiency.
+        - All images shape: [H, W, 3], e.g. [480, 854, 3]
+          All gts shape: [H, W], e.g. [480, 854]
+
+    About sequence length: Fix the length to max length of all train sequences;
+        Shorter sequences pad with previous frames in a reversing order until reaches max length
+
+    Train/val split:
+        - Only use train set during training
+        - Use val set to do validation
+
+    NOTE:
+        - The dataset implementation only include train/val sets.
+
+    TODO
+    Pre-processing(to be done in train script):
+        - Convert np.uint8 to proper datatype(np.float32 for imgs, np.int32 for gts)
+        - Randomly resize img/gt pairs
+        - Randomly left/right flips
+        - Subtract mean and divide var for images
+        - Dilate gts to get attention map
 '''
-
-# NOTE: The .tfrecord files are located on /work/wangyu/ on hpccremers4
 
 from __future__ import absolute_import
 from __future__ import division
@@ -30,191 +50,143 @@ from scipy.misc import imread
 class DAVIS_dataset():
     def __init__(self, params):
         '''
-        :param params(dict) keys:
-            mode: 'parent_train_binary'-train network with independent frames
-                  'parent_finetune_binary'-finetune network with 1st annotation of the seq
-            seq_path: only used in mode 'parent_finetune_binary', e.g. 'DAVIS_root/JPEGImages/480p/bike-packing'
-            batch:  1
-            tfrecord: None
+            The init method load all sequences' frames into memory.
         '''
 
         # Init params
         self._mode = params.get('mode', None)
-        self._batch = int(params.get('batch', 0))
-        self._tfrecord = params.get('tfrecord', None)
-        self._seq_path = params.get('seq_path', None)
-        self._dataset = None # only used in mode 'parent_train_binary'
-        self._scale = 100 # in percentage
-        self._map_threads = self._batch * 4
-        self._map_buffer = self._batch * 8
-        self._seq = None # only used in mode 'parent_finetune_binary'
+        self._seq_set = params.get('seq_set', None) # e.g. '../../../DAVIS17_train_val/ImageSets/2017/train.txt'
+
+        # some statistics about the data
+        self._max_train_len = 100
+        self._min_train_len = 25
+        self._avg_train_len = 70
+        self._max_val_len = 104
+        self._min_val_len = 34
+        self._avg_val_len = 67
         self._data_mean = np.array([115.195829334, 114.927476686, 107.725750308]).reshape((1,1,3))
         self._data_std = np.array([64.5572961827, 63.0172054007, 67.0494050908]).reshape((1,1,3))
 
-        # params check
+        if self._seq_set is None:
+            sys.exit('Must specify a set in txt format.')
         if self._mode is None:
-            sys.exit("Must specify a mode.")
-        if self._mode == 'parent_finetune_binary':
-            if self._seq_path is None:
-                sys.exit("Must specify a seq_path in mode {}".format(self._mode))
-        if self._mode == 'parent_train_binary' and self._batch == 0:
-            sys.exit("Must specify a batch size in mode {}".format(self._mode))
-        if self._mode == 'parent_train_binary':
-            if self._tfrecord is None:
-                sys.exit("Must specify a path to .tfrecord file in mode {}".format(self._mode))
-            else:
-                self._scale = int(self._tfrecord.split("_")[2].split(".")[0])
-
-        # Build up the pipeline
-        if self._mode == 'parent_train_binary':
-            self._dataset = self._build_pipeline()
-        elif self._mode == 'parent_finetune_binary':
-            self._seq = self._get_seq_frames()
-            print('Got {0} frames for seq {1}'.format(len(self._seq), self._seq_path))
+            sys.exit('Must specify a mode.')
+        elif self._mode == 'train':
+            self._seq_paths = self._load_seq_path()
+            self._train_imgs, self._train_gts = self._get_train_data()
+            # check length
+            if len(self._train_imgs) != len(self._train_gts) or len(self._train_imgs) == 0:
+                sys.exit('Train imgs/gts length do not match.')
+        elif self._mode == 'val':
+            self._seq_paths = self._load_seq_path()
+            self._val_imgs, self._val_gts = self._get_val_data()
+            if len(self._val_imgs) != len(self._val_gts) or len(self._val_imgs) == 0:
+                sys.exit('Val imgs/gts length do not match.')
         else:
-            sys.exit("Not supported mode.")
-        if self._mode == 'parent_train_binary' and self._dataset is None:
-            sys.exit("Data pipeline not built in mode {}".format(self._mode))
-        if self._mode == 'parent_finetune_binary' and self._seq is None:
-            sys.exit("Seq {0} data not restored in mode {1}".format(self._seq_path, self._mode))
+            sys.exit('Not supported mode.')
 
-    def _parse_single_record(self, record):
-        '''
-        :param record: tf.string, serilized
-        :return: data_dict
-        '''
+        self._permut_range = len(self._seq_paths)
+        print('Data loaded.')
 
-        # TFrecords format for DAVIS binary annotation dataset
-        if self._mode == 'parent_train_binary':
-            img_H = int(480 * self._scale / 100)
-            img_W = int(854 * self._scale / 100)
-            record_features = {
-                "img": tf.FixedLenFeature([img_H,img_W,3], tf.int64),
-                "gt": tf.FixedLenFeature([img_H,img_W,1], tf.int64)
-            }
-        else:
-            sys.exit("Current mode not supported.")
+    def _load_seq_path(self):
 
-        data_dict = {}
-        out_data = tf.parse_single_example(serialized=record, features=record_features)
+        seq_paths = []
+        with open(self._seq_set) as t:
+            seq_names = t.read().splitlines()  # e.g. [bike-packing, blackswan, ...]
+        for i in range(len(seq_names)):
+            seq_path = os.path.join('../../DAVIS17_train_val/JPEGImages/480p', seq_names[i])
+            seq_paths.append(seq_path)
+        print('Got {} seqs in total.'.format(len(seq_paths)))
 
-        # Cast RGB pixels to tf.float32, gt to tf.int32
-        data_dict['img'] = tf.cast(out_data['img'], tf.float32)
-        data_dict['gt'] = tf.cast(out_data['gt'], tf.int32)
+        return seq_paths
 
-        return data_dict
+    def _get_train_data(self):
 
-    def _image_std(self, example):
-        '''
-        :param example: parsed record - a dict
-        :return: a dict where RGB image is standardized
-        '''
-        rgb_img = example['img']
-        rgb_img -= self._data_mean
-        rgb_img /= self._data_std
+        train_imgs = []
+        train_gts = []
+        num_seq = len(self._seq_paths)
+        for seq_idx in range(num_seq):
+            seq_imgs = []
+            seq_gts = []
+            search_seq_imgs = os.path.join(self._seq_paths[seq_idx], "*.jpg")
+            files_seq = glob.glob(search_seq_imgs)
+            files_seq.sort()
+            num_frames = len(files_seq)
+            print('{} frames for seq {}'.format(num_frames, seq_idx))
+            if num_frames == 0:
+                sys.exit("Got no frames for seq {}".format(self._seq_paths[seq_idx]))
+            for i in range(num_frames):
+                frame_img = np.array(Image.open(files_seq[i])).astype(np.uint8)
+                frame_gt_path = files_seq[i].replace('JPEGImages', 'Annotations')
+                frame_gt_path = frame_gt_path.replace('jpg', 'png')
+                frame_gt = np.array(Image.open(frame_gt_path)).astype(np.uint8)
+                # convert to binary
+                gt_bool = np.greater(frame_gt, 0)
+                gt_bin = gt_bool.astype(np.uint8)
+                seq_imgs.append(frame_img)
+                seq_gts.append(gt_bin)
+            # go several rounds to fill up the required length
+            max_round = int(self._max_train_len / self._min_train_len) # 100 / 25 = 5 for train seqs
+            break_round = 0
+            for _ in range(max_round):
+                if break_round == 1: # if no further round required, break
+                    break
+                else:
+                    start_base = len(seq_imgs) - 2
+                for in_idx in range(num_frames-1):
+                    if len(seq_imgs) == self._max_train_len:
+                        break_round = 1
+                        break
+                    else:
+                        seq_imgs.append(seq_imgs[start_base-in_idx])
+                        seq_gts.append(seq_gts[start_base-in_idx])
+            print('After, {} frames for seq {}'.format(len(seq_imgs), seq_idx))
+            train_imgs.append(seq_imgs)
+            train_gts.append(seq_gts)
 
-        # Pack the result
-        tranformed = {}
-        tranformed['img'] = rgb_img
-        tranformed['gt'] = example['gt']
+        return train_imgs, train_gts
 
-        return tranformed
+    def _get_val_data(self):
 
-    def _parent_binary_train_transform(self, example):
-        '''
-        :param example: a standardized dict
-        :return: a dict where rgb/gt is transformed
+        val_imgs = []
+        val_gts = []
+        num_seq = len(self._seq_paths)
+        for seq_idx in range(num_seq):
+            seq_imgs = []
+            search_seq_imgs = os.path.join(self._seq_paths[seq_idx], "*.jpg")
+            files_seq = glob.glob(search_seq_imgs)
+            files_seq.sort()
+            num_frames = len(files_seq)
+            print('{} frames for seq {}'.format(num_frames, seq_idx))
+            if num_frames == 0:
+                sys.exit("Got no frames for seq {}".format(self._seq_paths[seq_idx]))
+            for i in range(num_frames):
+                frame_img = np.array(Image.open(files_seq[i])).astype(np.uint8)
+                seq_imgs.append(frame_img)
+            frame_gt_path = files_seq[0].replace('JPEGImages', 'Annotations')
+            frame_gt_path = frame_gt_path.replace('jpg', 'png')
+            seq_gt = np.array(Image.open(frame_gt_path)).astype(np.uint8)
+            # convert to binary
+            gt_bool = np.greater(seq_gt, 0)
+            gt_bin = gt_bool.astype(np.uint8)
+            val_imgs.append(seq_imgs)
+            val_gts.append(gt_bin)
 
-        Transformations:
-            - Randomly flip img/gt together
-        '''
+        return val_imgs, val_gts
 
-        # get weight matrix for balanced_cross_entropy loss
-        num_pos = tf.reduce_sum(example['gt'])
-        num_neg = tf.reduce_sum(1-example['gt'])
-        num_total = num_pos + num_neg
+    def _get_random_seq_idx(self):
 
-        weight_pos = tf.cast(num_neg, tf.float32) / tf.cast(num_total, tf.float32)
-        weight_neg = 1.0 - weight_pos
+        rand_seq_idx = np.random.permutation(self._permut_range)[0]
 
-        mat_pos = tf.multiply(tf.cast(example['gt'], tf.float32), weight_pos)
-        mat_neg = tf.multiply(tf.cast(1-example['gt'], tf.float32), weight_neg)
-        mat_weight = tf.add(mat_pos, mat_neg)
+        return rand_seq_idx
 
-        gt = tf.cast(example['gt'], tf.float32)
-        stacked = tf.concat([example['img'], gt, mat_weight], axis=-1) # shape: [H, W, 5]
-        stacked = tf.image.random_flip_left_right(stacked)
+    def get_random_seq(self):
 
-        # Pack the result
-        image = stacked[:,:,0:3]
-        gt = tf.cast(stacked[:,:,3:4], tf.int32)
-        balanced_mat = stacked[:,:,4:5]
-        transformed = {}
-        transformed['img'] = image
-        transformed['gt'] = gt
-        transformed['balanced_mat'] = balanced_mat
+        rand_seq_idx = self._get_random_seq_idx()
+        seq_imgs = self._train_imgs[rand_seq_idx] # list: [img0, img1, ...]
+        seq_gts = self._train_gts[rand_seq_idx] # list: [gt0, gt1, ...]
 
-        return  transformed
-
-    def _build_parent_binary_pipeline(self, tfrecord_file):
-        '''
-        :param tfrecord_file: .tfrecord file path, comes from self._tfrecord
-        :return: a tf.contrib.dataset object
-
-        NOTE: The .tfrecord is compressed as "GZIP"
-        '''
-        dataset = tf.contrib.data.TFRecordDataset(tfrecord_file, "GZIP")
-        dataset = dataset.repeat()
-        dataset = dataset.map(self._parse_single_record, num_threads=self._map_threads, output_buffer_size=self._map_buffer)
-        dataset = dataset.map(self._image_std, num_threads=self._map_threads, output_buffer_size=self._map_buffer)
-        dataset = dataset.map(self._parent_binary_train_transform, num_threads=self._map_threads, output_buffer_size=self._map_buffer)
-        dataset = dataset.shuffle(buffer_size=1500)
-        dataset = dataset.batch(self._batch)
-
-        return  dataset
-
-    def _build_pipeline(self):
-
-        if self._mode == 'parent_train_binary':
-            dataset = self._build_parent_binary_pipeline(tfrecord_file=self._tfrecord)
-            print("Train_parent_binary pipeline built. Load tfrecord: {}".format(self._tfrecord))
-        else:
-            sys.exit("Not supported mode.")
-
-        return dataset
-
-    def get_iterator(self):
-
-        iter = self._dataset.make_one_shot_iterator()
-
-        return iter
-
-    ## The following functions are not using .tfrecord.
-    ## They are mainly used on seq-by-seq train/fine-tune.
-    ## The data are read from disk and stored in main memory for the whole life of the model.
-
-    def _get_seq_frames(self):
-        '''
-        Example self._seq_path: 'DAVIS_root/JPEGImages/480p/bike-packing'
-        :return: A list of numpy image arrays
-
-        NOTE: the returned frames are standardized
-        '''
-        seq_frames = []
-        search_seq_imgs = os.path.join(self._seq_path, "*.jpg")
-        files_seq = glob.glob(search_seq_imgs)
-        files_seq.sort()
-        num_frames = len(files_seq)
-        if num_frames == 0:
-            sys.exit("Got no frames for seq {}".format(self._seq_path))
-        for i in range(num_frames):
-            frame = np.array(Image.open(files_seq[i])).astype(np.float32)
-            # stardardize
-            frame -= self._data_mean
-            frame /= self._data_std
-            seq_frames.append(frame)
-
-        return seq_frames
+        return seq_imgs, seq_gts
 
     def get_one_shot_pair(self):
         '''
@@ -250,6 +222,20 @@ class DAVIS_dataset():
         frame_list = self._seq[1:]
 
         return frame_list
+
+# For test purpose
+def main():
+
+    mydata = DAVIS_dataset({'mode': 'train',
+                            'seq_set': '../../DAVIS17_train_val/ImageSets/2017/train.txt'})
+
+    myseq, mygt = mydata.get_random_seq()
+    print('loaded random seq.')
+    imsave('ex_img.png', myseq[88])
+    imsave('ex_gt.png', mygt[88])
+
+if __name__ == '__main__':
+    main()
 
 
 
