@@ -22,30 +22,25 @@
 
     NOTE:
         - The dataset implementation only include train/val sets.
-
-    TODO
-    Pre-processing(to be done in train script):
-        - Convert np.uint8 to proper datatype(np.float32 for imgs, np.int32 for gts)
-        - Randomly resize img/gt pairs
-        - Randomly left/right flips
-        - Subtract mean and divide var for images
-        - Dilate gts to get attention map
 '''
 
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import tensorflow as tf
 import numpy as np
-from scipy.misc import imsave
 from PIL import Image
 import sys
 import os
 import glob
+from scipy.ndimage.morphology import binary_dilation
+from scipy.ndimage import generate_binary_structure
 from scipy.misc import imsave
 from scipy.misc import toimage
 from scipy.misc import imread
+
+data_mean = np.array([115.195829334, 114.927476686, 107.725750308]).reshape((1,1,3))
+data_std = np.array([64.5572961827, 63.0172054007, 67.0494050908]).reshape((1,1,3))
 
 class DAVIS_dataset():
     def __init__(self, params):
@@ -64,8 +59,8 @@ class DAVIS_dataset():
         self._max_val_len = 104
         self._min_val_len = 34
         self._avg_val_len = 67
-        self._data_mean = np.array([115.195829334, 114.927476686, 107.725750308]).reshape((1,1,3))
-        self._data_std = np.array([64.5572961827, 63.0172054007, 67.0494050908]).reshape((1,1,3))
+        # self._data_mean = np.array([115.195829334, 114.927476686, 107.725750308]).reshape((1,1,3))
+        # self._data_std = np.array([64.5572961827, 63.0172054007, 67.0494050908]).reshape((1,1,3))
 
         if self._seq_set is None:
             sys.exit('Must specify a set in txt format.')
@@ -222,6 +217,168 @@ class DAVIS_dataset():
         frame_list = self._seq[1:]
 
         return frame_list
+
+#     Pre-processing(called in train script):
+#        (done)- Convert np.uint8 to proper datatype(np.float32 for imgs, np.int32 for gts)
+#        (done)- Randomly resize/flip must be done sequence-wise
+#        (done)- Subtract mean and divide var for images
+#        (done) - Dilate gts to get attention map
+
+
+def standardize(f0, f1, s0, s1):
+    '''
+    :param f0: RGB img, shape [H,W,3], np.uint8
+    :param f1: RGB img, shape [H,W,3], np.uint8
+    :param s0: Seg_gt for f0, binary mask, shape [H,W], np.uint8
+    :param s1: Seg_gt for f1, binary mask, shape [H,W], np.uint8
+    :return: f0,f1,s0,s1, standardized, datatype converted
+    '''
+
+    f0 = f0.astype(np.float32)
+    f1 = f1.astype(np.float32)
+    s0 = s0.astype(np.int32)
+    s1 = s1.astype(np.int32)
+
+    f0 -= data_mean
+    f0 /= data_std
+    f1 -= data_mean
+    f1 /= data_std
+
+    return f0, f1, s0, s1
+
+
+def ge_att_pairs(s0, s1):
+    '''
+    :param s0: Seg_gt for f0, binary mask, shape [H,W], np.int32
+    :param s1: Seg_gt for f1, binary mask, shape [H,W], np.int32
+    :return: a0, a1, a01 (all dilated), shape [H,W], np.int32
+    '''
+
+    struct1 = generate_binary_structure(2, 2)
+    a0 = binary_dilation(s0, structure=struct1, iterations=30).astype(s0.dtype)
+    a1 = binary_dilation(s1, structure=struct1, iterations=30).astype(s1.dtype)
+    a01 = binary_dilation(s0, structure=struct1, iterations=40).astype(s0.dtype)
+
+    return a0, a1, a01
+
+
+def random_resize_flip(f0, f1, s0, s1, a0, a1, a01, flip, scale):
+    '''
+    NOTE: This function must be applied to every frame for a particular sequence,
+    each sequence might (not)flip and has different scale of resize.
+
+    :param f0: RGB img, [H,W,3], np.float32
+    :param f1: RGB img, [H,W,3], np.float32
+    :param s0: Seg_gt for f0, binary, shape [H,W], np.int32
+    :param s1: Seg_gt for f1, binary, shape [H,W], np.int32
+    :param a0: Att_gt for f0, binary, shape [H,W], np.int32
+    :param a1: Att_gt for f1, binary, shape [H,W], np.int32
+    :param a01: Attention oracle for f1, binary, shape [H,W], np.int32
+    :param flip: Boolen, flip or not
+    :param scale: np.float32, range: [0.6-1.2], the resize scale
+    :return: f0, f1, s0, s1, a0, a1, a01 (all resized/fliped together)
+    '''
+
+    # stack them, converted to np.float32, [H,W,11]
+    stacked = np.concatenate((f0, f1,
+                              s0[..., np.newaxis], s1[..., np.newaxis],
+                              a0[..., np.newaxis], a1[..., np.newaxis],
+                              a01[..., np.newaxis]), axis=-1)
+    if flip:
+        stacked = np.fliplr(stacked)
+    img_H = np.shape(f0)[0]
+    img_W = np.shape(f0)[1]
+    new_H = int(img_H * scale)
+    new_W = int(img_W * scale)
+    # PIL.Image.resize preserve range, Image.NEAREST, Image.BILINEAR
+    # scipy.misc.imresize rescale to (0,255)
+    f0_obj = Image.fromarray(stacked[:,:,0:3], mode='F')
+    f0_obj.resize((new_H, new_W), Image.BILINEAR)
+    f0 = np.array(f0_obj, np.float32)
+
+    f1_obj = Image.fromarray(stacked[:,:,3:6], mode='F')
+    f1_obj.resize((new_H, new_W), Image.BILINEAR)
+    f1 = np.array(f1_obj, np.float32)
+
+    s0_obj = Image.fromarray(stacked[:,:,6:7], mode='I')
+    s0_obj.resize((new_H, new_W), Image.NEAREST)
+    s0 = np.array(s0_obj, np.int32)
+
+    s1_obj = Image.fromarray(stacked[:,:,7:8], mode='I')
+    s1_obj.resize((new_H, new_W), Image.NEAREST)
+    s1 = np.array(s1_obj, np.int32)
+
+    a0_obj = Image.fromarray(stacked[:,:,8:9], mode='I')
+    a0_obj.resize((new_H, new_W), Image.NEAREST)
+    a0 = np.array(a0_obj, np.int32)
+
+    a1_obj = Image.fromarray(stacked[:,:,9:10], mode='I')
+    a1_obj.resize((new_H, new_W), Image.NEAREST)
+    a1 = np.array(a1_obj, np.int32)
+
+    a01_obj = Image.fromarray(stacked[:,:,10:11], mode='I')
+    a01_obj.resize((new_H, new_W), Image.NEAREST)
+    a01 = np.array(a01_obj, np.int32)
+
+    return f0, f1, s0, s1, a0, a1, a01
+
+
+def get_balance_weight(mask):
+    '''
+    :param mask: [H,W,1], np.int32, binary
+    :return: weight matrix, [H,W,1], np.float32
+    '''
+    num_pos = np.sum(mask)
+    num_neg = np.sum(1 - mask)
+    num_total = num_pos + num_neg
+    weight_pos = num_neg.astype(np.float32) / num_total.astype(np.float32)
+    weight_neg = 1.0 - weight_pos
+    mat_pos = np.multiply(mask.astype(np.float32), weight_pos)
+    mat_neg = np.multiply((1.0 - mask).astype(np.float32), weight_neg)
+    mat_weight = np.add(mat_pos, mat_neg)
+
+    return mat_weight
+
+
+def get_balance_weights(s0, a1):
+    '''
+    :param s0: segmentation gt for f0, [H,W,1], np.int32
+    :param a1: attention gt for a1, [H,W,1], np.int32
+    :return: weight matrix for s0, a1; shape/dtype doesn't change
+    '''
+    w0 = get_balance_weight(s0)
+    w1 = get_balance_weight(a1)
+
+    return w0, w1
+
+
+def pack_reshape_batch(b0, b1):
+    '''
+    :param b0: [H,W,C]
+    :param b1: [H,W,C]
+    :return: stacked [2,H,W,C]
+    '''
+    stacked = np.stack((b0, b1), axis=0)
+
+    return stacked
+
+
+def get_flip_bool():
+
+    rand_f = np.random.rand()
+    if rand_f >= 0.5:
+        return True
+    else:
+        return False
+
+
+def get_scale():
+
+    rand_i = np.random.randint(6,13)
+    rand_scale = float(rand_i) / 10.0
+
+    return rand_scale
+
 
 # For test purpose
 def main():

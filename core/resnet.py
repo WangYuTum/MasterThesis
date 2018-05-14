@@ -3,9 +3,8 @@
 
     NOTE: the code is still under developing.
     TODO:
-        * padding in deconv layer: used SAME-osvos. consider VALID suggested from online_tutorial ?
-        * bias layers: added on side path. on backbone net?
-        * Learning rate scheduler
+        * Loss formulate
+        * Compute required theoretical memory footage
 '''
 
 from __future__ import division
@@ -37,20 +36,24 @@ class ResNet():
         if self._data_format is not "NCHW" and self._data_format is not "NHWC":
             sys.exit("Invalid data format. Must be either 'NCHW' or 'NHWC'.")
 
-    def _build_model(self, images, is_train=False):
+    def _build_model(self, images, att0, att_oracle):
         '''
-        :param image: image in RGB format
-        :param is_train: either True or False
-        :return: main output and side supervision
+        :param image: [2,H,W,3], tf.float32
+        :param att0: [1,H,W,1], tf.int32
+        :param att_oracle: [1,H,W,1], tf.int32
+        :return: attention and segmentation branch output before softmax
         '''
         model = {}
-        if is_train:
-            dropout=True
-        else:
-            dropout=False
+
         if self._data_format == "NCHW":
             images = tf.transpose(images, [0,3,1,2])
+        im_size = tf.shape(images)
 
+        ## attention gating on raw images
+        images = self._att_gate(images, att0, att_oracle)
+
+
+        ## The following 'main' scope is the primary (shared) feature layers, downsampling 16x
         shape_dict = {}
         shape_dict['B0'] = [3,3,3,64]
 
@@ -67,11 +70,11 @@ class ResNet():
             shape_dict['B1']['side'] = [1, 1, 64, 128]
             shape_dict['B1']['convs'] = [[3, 3, 64, 128], [3, 3, 128, 128]]
             with tf.variable_scope('B1_0'):
-                model['B1_0'] = nn.res_side(self._data_format, model['B0_pooled'], shape_dict['B1'], is_train)
+                model['B1_0'] = nn.res_side(self._data_format, model['B0_pooled'], shape_dict['B1'])
             for i in range(2):
                 with tf.variable_scope('B1_' + str(i + 1)):
                     model['B1_' + str(i + 1)] = nn.res(self._data_format, model['B1_' + str(i)],
-                                                   shape_dict['B1']['convs'], is_train)
+                                                   shape_dict['B1']['convs'])
 
             # Pooling 2
             model['B1_2_pooled'] = nn.max_pool2d(self._data_format, model['B1_2'], 2, 'SAME')
@@ -81,11 +84,11 @@ class ResNet():
             shape_dict['B2']['side'] = [1, 1, 128, 256]
             shape_dict['B2']['convs'] = [[3, 3, 128, 256], [3, 3, 256, 256]]
             with tf.variable_scope('B2_0'):
-                model['B2_0'] = nn.res_side(self._data_format, model['B1_2_pooled'], shape_dict['B2'], is_train)
+                model['B2_0'] = nn.res_side(self._data_format, model['B1_2_pooled'], shape_dict['B2'])
             for i in range(2):
                 with tf.variable_scope('B2_' + str(i + 1)):
                     model['B2_' + str(i + 1)] = nn.res(self._data_format, model['B2_' + str(i)],
-                                                       shape_dict['B2']['convs'], is_train)
+                                                       shape_dict['B2']['convs'])
 
             # Pooling 3
             model['B2_2_pooled'] = nn.max_pool2d(self._data_format, model['B2_2'], 2, 'SAME')
@@ -95,11 +98,11 @@ class ResNet():
             shape_dict['B3']['side'] = [1, 1, 256, 512]
             shape_dict['B3']['convs'] = [[3, 3, 256, 512], [3, 3, 512, 512]]
             with tf.variable_scope('B3_0'):
-                model['B3_0'] = nn.res_side(self._data_format, model['B2_2_pooled'], shape_dict['B3'], is_train)
+                model['B3_0'] = nn.res_side(self._data_format, model['B2_2_pooled'], shape_dict['B3'])
             for i in range(5):
                 with tf.variable_scope('B3_' + str(i + 1)):
                     model['B3_' + str(i + 1)] = nn.res(self._data_format, model['B3_' + str(i)],
-                                                       shape_dict['B3']['convs'], is_train)
+                                                       shape_dict['B3']['convs'])
 
             # Pooling 4
             model['B3_5_pooled'] = nn.max_pool2d(self._data_format, model['B3_5'], 2, 'SAME')
@@ -109,18 +112,36 @@ class ResNet():
             shape_dict['B4_0']['side'] = [1, 1, 512, 1024]
             shape_dict['B4_0']['convs'] = [[3, 3, 512, 512],[3, 3, 512, 1024]]
             with tf.variable_scope('B4_0'):
-                model['B4_0'] = nn.res_side(self._data_format, model['B3_5_pooled'], shape_dict['B4_0'], is_train)
+                model['B4_0'] = nn.res_side(self._data_format, model['B3_5_pooled'], shape_dict['B4_0'])
             shape_dict['B4_23'] = [[3, 3, 1024, 512], [3, 3, 512, 1024]]
             for i in range(2):
                 with tf.variable_scope('B4_' + str(i + 1)):
                     model['B4_' + str(i + 1)] = nn.res(self._data_format, model['B4_' + str(i)],
-                                                       shape_dict['B4_23'], is_train)
+                                                       shape_dict['B4_23'])
 
-            # add side conv path and upsample, crop to image size
-            im_size = tf.shape(images)
+            shape_dict['feat_reduce'] = [1,1,1024,128]
+            with tf.variable_scope('feat_reduce'):
+                model['feat_reduced'] = nn.conv_layer(self._data_format, model['B4_2'], 1, 'SAME',
+                                                      shape_dict['feat_reduce'])
+                model['feat_reduced'] = nn.bias_layer(self._data_format, model['feat_reduced'], 128)
+                model['feat_reduced'] = nn.ReLu_layer(model['feat_reduced'])
+
+            f_0 = model['feat_reduced'][0:1,:,:,:] # [1,h,w,128] or [1,128,h,w]
+            f_1 = model['feat_reduced'][1:2,:,:,:] # [1,h,w,128] or [1,128,h,w]
+
+        with tf.variable_scope('segmentation'):
+            # go to conv2dLSTM
+            with tf.variable_scope('seg_lstm2d'):
+                out_lstm2d_seg = nn.lstm_conv2d(self._data_format, f_0) # [1,h,w,128] or [1,128,h,w]
+            shape_dict['lstm2d_decode'] = [1,1,128,128]
+            with tf.variable_scope('lstm2d_decode'):
+                model['lstm2d_decode'] = nn.conv_layer(self._data_format, out_lstm2d_seg, 1,
+                                                       'SAME', shape_dict['lstm2d_decode'])
+
+            # aggregate all feature on diff levels
             with tf.variable_scope('B1_side_path'):
                 side_2 = nn.conv_layer(self._data_format, model['B1_2'], 1, 'SAME', [3, 3, 128, 16])
-                side_2 = nn.bias_layer(self._data_format, side_2, [16])
+                side_2 = nn.bias_layer(self._data_format, side_2, 16)
                 side_2_f = nn.conv_transpose(self._data_format, side_2, [16, 16], 2, 'SAME')
                 side_2_f = nn.crop_features(self._data_format, side_2_f, im_size)
             with tf.variable_scope('B2_side_path'):
@@ -138,44 +159,88 @@ class ResNet():
                 side_16 = nn.bias_layer(self._data_format, side_16, 16)
                 side_16_f = nn.conv_transpose(self._data_format, side_16, [16, 16], 16, 'SAME')
                 side_16_f = nn.crop_features(self._data_format, side_16_f, im_size)
-
-            # add side path supervision
-            sup_out = {}
-            with tf.variable_scope('B1_side_sup'):
-                side_2_s = nn.conv_layer(self._data_format, side_2, 1, 'SAME', [1, 1, 16, 2])
-                side_2_s = nn.bias_layer(self._data_format, side_2_s, [2])
-                side_2_s = nn.conv_transpose(self._data_format, side_2_s, [2, 2], 2, 'SAME')
-                side_2_s = nn.crop_features(self._data_format, side_2_s, im_size)
-                sup_out['side_2_s'] = side_2_s
-            with tf.variable_scope('B2_side_sup'):
-                side_4_s = nn.conv_layer(self._data_format, side_4, 1, 'SAME', [1, 1, 16, 2])
-                side_4_s = nn.bias_layer(self._data_format, side_4_s, [2])
-                side_4_s = nn.conv_transpose(self._data_format, side_4_s, [2, 2], 4, 'SAME')
-                side_4_s = nn.crop_features(self._data_format, side_4_s, im_size)
-                sup_out['side_4_s'] = side_4_s
-            with tf.variable_scope('B3_side_sup'):
-                side_8_s = nn.conv_layer(self._data_format, side_8, 1, 'SAME', [1, 1, 16, 2])
-                side_8_s = nn.bias_layer(self._data_format, side_8_s, [2])
-                side_8_s = nn.conv_transpose(self._data_format, side_8_s, [2, 2], 8, 'SAME')
-                side_8_s = nn.crop_features(self._data_format, side_8_s, im_size)
-                sup_out['side_8_s'] = side_8_s
-            with tf.variable_scope('B4_side_sup'):
-                side_16_s = nn.conv_layer(self._data_format, side_16, 1, 'SAME', [1, 1, 16, 2])
-                side_16_s = nn.bias_layer(self._data_format, side_16_s, [2])
-                side_16_s = nn.conv_transpose(self._data_format, side_16_s, [2, 2], 16, 'SAME')
-                side_16_s = nn.crop_features(self._data_format, side_16_s, im_size)
-                sup_out['side_16_s'] = side_16_s
+            with tf.variable_scope('lstm_decoded'):
+                side_lstm = nn.conv_layer(self._data_format, model['lstm2d_decode'], 1, 'SAME', [3, 3, 128, 16])
+                side_lstm = nn.bias_layer(self._data_format, side_lstm, 16)
+                side_lstm_f = nn.conv_transpose(self._data_format, side_lstm, [16, 16], 16, 'SAME')
+                side_lstm_f = nn.crop_features(self._data_format, side_lstm_f, im_size)
 
             # concat and linearly fuse
             if self._data_format == "NCHW":
-                concat_side = tf.concat([side_2_f, side_4_f, side_8_f, side_16_f], axis=1)
+                concat_seg_feat = tf.concat([side_2_f, side_4_f, side_8_f, side_16_f, side_lstm_f], axis=1)
             else:
-                concat_side = tf.concat([side_2_f, side_4_f, side_8_f, side_16_f], axis=3)
+                concat_seg_feat = tf.concat([side_2_f, side_4_f, side_8_f, side_16_f, side_lstm_f], axis=3)
             with tf.variable_scope('fuse'):
-                net_out = nn.conv_layer(self._data_format, concat_side, 1, 'SAME', [1, 1, 64, 2])
-                net_out = nn.bias_layer(self._data_format, net_out, 2)
+                seg_out = nn.conv_layer(self._data_format, concat_seg_feat, 1, 'SAME', [1, 1, 80, 2])
+                seg_out = nn.bias_layer(self._data_format, seg_out, 2)
 
-        return net_out, sup_out
+
+        with tf.variable_scope('attention'):
+            # fuse visual features from f0 and f1
+            if self._data_format == "NCHW":
+                dual_feat = tf.concat([model['lstm2d_decode'], f_1], axis=1) # [1,256,h,w]
+            else:
+                dual_feat = tf.concat([model['lstm2d_decode'], f_1], axis=3) # [1,h,w,256]
+            # fuse dual feat and reduce
+            with tf.variable_scope('fuse'):
+                dual_feat = nn.conv_layer(self._data_format, dual_feat, 1, 'SAME', [1,1,256,256])
+                dual_feat = nn.bias_layer(self._data_format, dual_feat, 256)
+                dual_feat = nn.ReLu_layer(dual_feat)
+            with tf.variable_scope('reduce'):
+                dual_feat = nn.conv_layer(self._data_format, dual_feat, 1, 'SAME', [1,1,256,128])
+                dual_feat = nn.bias_layer(self._data_format, dual_feat, 128)
+                dual_feat = nn.ReLu_layer(dual_feat)
+            with tf.variable_scope('att_lstm'):
+                out_lstm2d_att = nn.lstm_conv2d(self._data_format, dual_feat) # [1,h,w,128] or [1,128,h,w]
+            with tf.variable_scope('lstm2d_decode'):
+                att_lstm_decode = nn.conv_layer(self._data_format, out_lstm2d_att, 1,
+                                                'SAME', [1,1,128,128])
+            with tf.variable_scope('up'):
+                att_out = nn.conv_layer(self._data_format, att_lstm_decode, 1, 'SAME', [1,1,128,2])
+                att_out = nn.bias_layer(self._data_format, att_out, 2)
+                att_out = nn.conv_transpose(self._data_format, att_out, [16, 16], 16, 'SAME')
+                att_out = nn.crop_features(self._data_format, att_out, im_size)
+
+        return att_out, seg_out
+
+    def _att_gate(self, images, att0, att_oracle):
+        '''
+        :param images: [2,H,W,3] or [2,3,H,W], tf.float32
+        :param att0: [1,H,W,1], tf.int32
+        :param att_oracle: [1,H,W,1], tf.int32
+        :return: stacked gated f0 and f1, [2,H,W,3] or [2,3,H,W]
+        '''
+
+        if self._data_format == 'NCHW':
+            att0 = tf.transpose(att0, [0, 3, 1, 2])
+            att_oracle = tf.transpose(att_oracle, [0, 3, 1, 2])
+        att0_mask = tf.cast(att0, tf.float32)
+        att_oracle_mask = tf.cast(att_oracle, tf.float32)
+        # Gate
+        gated_f0 = tf.multiply(images[0:1,:,:,:], att0_mask)
+        gated_f1 = tf.multiply(images[1:2,:,:,:], att_oracle_mask)
+        stacked = tf.concat([gated_f0, gated_f1], axis=0)
+
+        return stacked
+
+    def train(self, feed_img, feed_seg, feed_weight, feed_att, feed_att_oracle, acc_count, global_step):
+        '''
+        :param feed_img: [2,H,W,3], tf.float32; f0, f1
+        :param feed_seg: [2,H,W,1], tf.int32; s0, s1
+        :param feed_weight: [2,H,W,1], tf.float32; w_s0, w_att1
+        :param feed_att: [2,H,W,1], tf.int32; a0, a1
+        :param feed_att_oracle: [1,H,W,1], tf.int32; a01
+        :param acc_count: default to 1
+        :param global_step: keep track of global train step
+        :return: total_loss, train_step_op, grad_acc_op
+        '''
+
+        att_out, seg_out = self._build_model(feed_img, feed_att[0:1,:,:,:], feed_att_oracle)
+        # att_out, seg_out both shape: [1,H,W,2] with original input image size
+
+
+        return 0
+        #return total_loss, train_step_op, grad_acc_op
 
     def train(self, images, gts, weight, sup, acc_count, global_step):
         '''
@@ -303,27 +368,3 @@ class ResNet():
         update_op = optimizer.apply_gradients(mean_grads_vars, global_step=global_step)
 
         return update_op, grad_accumulator_op
-
-    # def  _flatten_logits(self, input_tensor):
-    #     '''
-    #     :param input_tensor: Must have shape [N, H, W, 2]
-    #     :return: the same tensor with shape [N, H*W, 2]
-    #     '''
-    #     kernel = tf.Variable([[[[1, 0], [0, 1]]]], dtype=tf.float32, trainable=False, name='flatten_logits_kernel')
-    #     flatten_out = tf.nn.conv2d(input_tensor, kernel, strides=[1, 1, 1, 1], padding='VALID', data_format="NHWC")
-    #
-    #     return flatten_out
-    #
-    # def _flatten_labels(self, input_tensor, dtype):
-    #     '''
-    #     :param input_tensor: labels/weights have shape [N, H, W, 1]
-    #     :return: flattened tensor with shape [N, H*W]
-    #     '''
-    #     if dtype == "tf.int32":
-    #         input_tensor = tf.cast(input_tensor, tf.float32)
-    #     kernel = tf.Variable([[[[1]]]], dtype=tf.float32, trainable=False, name='flatten_label_kernel')
-    #     flatten_out = tf.nn.conv2d(input_tensor, kernel, strides=[1,1,1,1], padding='VALID', data_format="NHWC")
-    #     if dtype == "tf.int32":
-    #         flatten_out = tf.cast(flatten_out, tf.int32)
-    #
-    #     return flatten_out

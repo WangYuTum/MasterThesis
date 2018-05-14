@@ -11,6 +11,13 @@ import numpy as np
 import sys
 
 
+def lstm_conv2d(data_format, input_tensor):
+    # TODO
+    pass
+
+    return 1
+
+
 def conv_layer(data_format, input_tensor, stride=1, padding='SAME', shape=None):
     ''' The standard convolution layer '''
     scope_name = tf.get_variable_scope().name
@@ -27,7 +34,7 @@ def conv_layer(data_format, input_tensor, stride=1, padding='SAME', shape=None):
     return conv_out
 
 
-def res_side(data_format, input_tensor, shape_dict, is_train=False):
+def res_side(data_format, input_tensor, shape_dict):
     ''' The residual block unit with side conv '''
 
     # The 1st activation
@@ -50,7 +57,7 @@ def res_side(data_format, input_tensor, shape_dict, is_train=False):
     return  block_out
 
 
-def res(data_format, input_tensor, shape_dict, is_train=False):
+def res(data_format, input_tensor, shape_dict):
     ''' The residual block unit with shortcut '''
 
     scope_name = tf.get_variable_scope().name
