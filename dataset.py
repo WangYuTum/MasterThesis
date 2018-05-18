@@ -323,7 +323,7 @@ def random_resize_flip(f0, f1, s0, s1, a0, a1, a01, flip, scale):
     return f0, f1, s0, s1, a0, a1, a01
 
 
-def get_balance_weight(mask):
+def get_att_balance_weight(mask):
     '''
     :param mask: [H,W,1], np.int32, binary
     :return: weight matrix, [H,W,1], np.float32
@@ -340,14 +340,37 @@ def get_balance_weight(mask):
     return mat_weight
 
 
-def get_balance_weights(s0, a1):
+def get_seg_balance_weight(seg, att):
+    '''
+    :param seg: segmentation gt for f0, [H,W,1], np.int32
+    :param att: attention gt for f0, [H,W,1], np.int32
+    :return: weight matrix, [H,W,1], np.float32
+
+    NOTE: set all weights to 0s except for attention area,
+          compute balance weight within attention area.
+    '''
+
+    num_total = np.sum(att)
+    num_pos = np.sum(seg)
+    num_neg = num_total - num_pos
+    weight_pos = num_neg.astype(np.float32) / num_total.astype(np.float32)
+    weight_neg = 1.0 - weight_pos
+    mat_pos = np.multiply(seg.astype(np.float32), weight_pos)
+    mat_neg = np.multiply(np.subtract(att, seg).astype(np.float32), weight_neg)
+    mat_weight = np.add(mat_pos, mat_neg)
+
+    return mat_weight
+
+
+def get_balance_weights(s0, a0, a1):
     '''
     :param s0: segmentation gt for f0, [H,W,1], np.int32
+    :param a0: attention gt for f0, [H,W,1], np.int32
     :param a1: attention gt for a1, [H,W,1], np.int32
     :return: weight matrix for s0, a1; shape/dtype doesn't change
     '''
-    w0 = get_balance_weight(s0)
-    w1 = get_balance_weight(a1)
+    w0 = get_seg_balance_weight(s0, a0)
+    w1 = get_att_balance_weight(a1)
 
     return w0, w1
 

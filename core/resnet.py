@@ -28,6 +28,7 @@ class ResNet():
         self._data_format = params.get('data_format', None)
         self._batch = params.get('batch', 1)
         self._l2_weight = params.get('l2_weight', 0.0002)
+        self._l1_att = params.get('l1_att', 0.0001)
         self._init_lr = params.get('init_lr', 1e-5)
         self._base_decay = params.get('base_decay', 1.0)
         self._sup_decay = params.get('sup_decay', 0.1)
@@ -223,6 +224,62 @@ class ResNet():
 
         return stacked
 
+    def _att_loss(self, att_out, att_gt, att_weight):
+        '''
+        :param att_out: logits, [1,H,W,2] or [1,2,H,W], tf.float32
+        :param att_gt: [1,H,W,1], tf.int32
+        :param att_weight: [1,H,W,1], tf.float32
+        :return: scalar (balanced cross-entropy), tf.float32
+        '''
+
+        loss = self._balanced_cross_entropy(input_tensor=att_out,
+                                            labels=att_gt,
+                                            weight=att_weight)
+        tf.summary.scalar('att_loss', loss)
+
+        return loss
+
+    def _att_sparsity(self, att_out):
+        '''
+        :param att_out: logits, [1,H,W,2] or [1,2,H,W], tf.float32
+        :return: l1 norm on the softmax of positive prob, tf.float32
+        '''
+        if self._data_format == "NCHW":
+            att_out = tf.transpose(att_out, [0,2,3,1])
+        att_prob = tf.nn.softmax(att_out)[:,:,:,1:2]
+        loss = tf.norm(att_prob, ord=1) * self._l1_att
+        tf.summary.scalar('att_sparsity', loss)
+
+        return loss
+
+    # def _att_coverage(self, att_out, seg_gt):
+    #     '''
+    #     :param att_out: logits, [1,H,W,2] or [1,2,H,W], tf.float32
+    #     :param seg_gt: [1,H,W,1], tf.int32
+    #     :return: scalar, coverage over seg_gt, tf.float32
+    #     '''
+    #
+    #     pass
+
+    def _seg_loss(self, seg_out, seg_gt, seg_weight):
+        '''
+        :param seg_out: logits, [1,H,W,2] or [1,2,H,W], tf.float32
+        :param seg_gt: [1,H,W,1], tf.int32
+        :param seg_weight: [1,H,W,1], tf.float32
+        :return: scalar (balanced cross-entropy), tf.float32
+
+        NOTE: the balanced weights are computed within the attention area of f0
+              area beyond the attention is set to 0s
+        '''
+
+        loss = self._balanced_cross_entropy(input_tensor=seg_out,
+                                            labels=seg_gt,
+                                            weight=seg_weight)
+        tf.summary.scalar('seg_loss', loss)
+
+        return loss
+
+
     def train(self, feed_img, feed_seg, feed_weight, feed_att, feed_att_oracle, acc_count, global_step):
         '''
         :param feed_img: [2,H,W,3], tf.float32; f0, f1
@@ -236,47 +293,27 @@ class ResNet():
         '''
 
         att_out, seg_out = self._build_model(feed_img, feed_att[0:1,:,:,:], feed_att_oracle)
-        # att_out, seg_out both shape: [1,H,W,2] with original input image size
-
-
-        return 0
-        #return total_loss, train_step_op, grad_acc_op
-
-    def train(self, images, gts, weight, sup, acc_count, global_step):
-        '''
-        :param images: batch of images have shape [batch, H, W, 3] where H, W depend on the scale of dataset
-        :param gts: batch of gts have shape [batch, H, W, 1]
-        :param weight: batch of balanced weights have shape [batch, H, W, 1]
-        :param sup: use side supervision or not
-        :param acc_count: the number of gradients needed to accumulate before applying optimization method
-        :param global_step: keep tracking of global training step
-        :return: a tf.Tensor scalar, a train op
-        '''
-
-        net_out, sup_out = self._build_model(images, True) # [N, C, H, W] or [N, H, W, C]
-        if sup == 1:
-            total_loss = self._balanced_cross_entropy(net_out, gts, weight) \
-                        + self._sup_loss(sup_out, gts, weight) \
-                        + self._l2_loss()
-        else:
-            total_loss = self._balanced_cross_entropy(net_out, gts, weight) + self._l2_loss()
+        # att_out, seg_out both shape: [1,H,W,2] or [1,2,H,W] with original input image size
+        total_loss = self._att_loss(att_out, feed_att[1:2,:,:,:], feed_weight[1:2,:,:,:]) \
+                    + self._att_sparsity(att_out) \
+                    + self._seg_loss(seg_out, feed_seg[0:1,:,:,:], feed_weight[0:1,:,:,:]) \
+                    + self._l2_loss()
+        #            + self._att_coverage(att_out, feed_seg[1:2, :, :, :]) \
         tf.summary.scalar('total_loss', total_loss)
 
-        # display current predict
+        # display current output
         if self._data_format == "NCHW":
-            pred_out = tf.transpose(net_out, [0, 2, 3, 1])
+            att_pred = tf.transpose(att_out, [0,2,3,1])
+            seg_pred = tf.transpose(seg_out, [0,2,3,1])
         else:
-            pred_out = net_out
-        # pred_out = tf.argmax(tf.nn.softmax(pred_out), axis=3) # [batch, H, W]
-        # pred_out = tf.expand_dims(pred_out, -1) # [batch, H, W, 1]
-        # pred_out = pred_out[:,:,:,1:2]
-        tf.summary.image('pred', tf.cast(tf.nn.softmax(pred_out)[:,:,:,1:2], tf.float16))
+            att_pred = att_out
+            seg_pred = seg_out
+        tf.summary.image('att_pred', tf.cast(tf.nn.softmax(att_pred)[:,:,:,1:2], tf.float16))
+        tf.summary.image('seg_pred', tf.cast(tf.nn.softmax(seg_pred)[:,:,:,1:2] ,tf.float16))
 
-        train_step, grad_acc_op = self._optimize(total_loss, acc_count, global_step)
-        #train_step = tf.train.AdamOptimizer(self._init_lr).minimize(total_loss)
-        print("Model built.")
+        train_step_op, grad_acc_op = self._optimize(total_loss, acc_count, global_step)
 
-        return total_loss, train_step, grad_acc_op
+        return total_loss, train_step_op, grad_acc_op
 
     def test(self, images):
         '''
@@ -301,14 +338,10 @@ class ResNet():
 
         if self._data_format == "NCHW":
             input_tensor = tf.transpose(input_tensor, [0, 2, 3, 1]) # to NHWC
-        # Flatten the tensor using convolution
         input_shape = tf.shape(input_tensor)
         feed_logits = tf.reshape(input_tensor, [input_shape[0], input_shape[1]*input_shape[2], input_shape[3]])
         feed_labels = tf.reshape(labels, [input_shape[0], input_shape[1]*input_shape[2]])
         feed_weight = tf.reshape(weight, [input_shape[0], input_shape[1] * input_shape[2]])
-        # feed_logits = self._flatten_logits(input_tensor) # [N, H*W, 2]
-        # feed_labels = self._flatten_labels(labels, 'tf.int32') # [N, H*W]
-        # feed_weight = self._flatten_labels(weight, 'tf.float32') # [N, H*W]
 
         cross_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=feed_labels, logits=feed_logits)
         balanced_loss = tf.multiply(cross_loss, feed_weight)
@@ -322,21 +355,6 @@ class ResNet():
             l2_losses.append(tf.nn.l2_loss(var))
 
         return tf.multiply(self._l2_weight, tf.add_n(l2_losses))
-
-    def _sup_loss(self, sup_dict, gts, weight):
-
-        side_2_loss = self._balanced_cross_entropy(sup_dict['side_2_s'], gts, weight)
-        tf.summary.scalar('side_2_loss', side_2_loss)
-        side_4_loss = self._balanced_cross_entropy(sup_dict['side_4_s'], gts, weight)
-        tf.summary.scalar('side_4_loss', side_4_loss)
-        side_8_loss = self._balanced_cross_entropy(sup_dict['side_8_s'], gts, weight)
-        tf.summary.scalar('side_8_loss', side_8_loss)
-        side_16_loss = self._balanced_cross_entropy(sup_dict['side_16_s'], gts, weight)
-        tf.summary.scalar('side_16_loss', side_16_loss)
-
-        side_total = 0.5 * side_2_loss + 0.5 * side_4_loss + 0.5 * side_8_loss + 0.5 * side_16_loss
-
-        return side_total
 
     def _optimize(self, loss, acc_count, global_step):
         '''

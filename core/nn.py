@@ -12,8 +12,13 @@ import sys
 
 
 def lstm_conv2d(data_format, input_tensor):
-    # TODO
-    pass
+    '''
+    :param data_format: 'NCHW' or 'NHWC'
+    :param input_tensor: [1,128,H,W] or [1,H,W,128]
+    :return: out of lstm [1,128,H,W] or [1,H,W,128]
+    '''
+
+    #TODO
 
     return 1
 
