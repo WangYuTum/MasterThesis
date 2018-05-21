@@ -40,7 +40,7 @@ with tf.device('/cpu:0'):
 
 # config train params
 params_model = {
-    'batch': 2, # feed consecutive images at once
+    'batch': 4, # feed consecutive images at once
     'l2_weight': 0.0002,
     'init_lr': 1e-5, # original paper: 1e-8,
     'l1_att': 1e-4, # l1 sparsity on attention map
@@ -53,36 +53,45 @@ params_model = {
 # define epochs
 epochs = 10
 frames_per_seq = 100
-steps_per_seq = 99
+steps_per_seq = 33
 num_seq = 60
 total_steps = epochs * num_seq * steps_per_seq
 global_step = tf.Variable(0, name='global_step', trainable=False) # incremented automatically by 1 after each apply_gradients
 acc_count = 1
 save_ckpt_interval = 10000
-summary_write_interval = 5 # 50
-print_screen_interval = 5 # 20
+summary_write_interval = 2 # 50
+print_screen_interval = 1 # 20
 
 # define placeholders
-feed_img = tf.placeholder(tf.float32, (params_model['batch'], None, None, 3)) # f0, f1
-feed_seg = tf.placeholder(tf.int32, (params_model['batch'], None, None, 1)) # s0, s1
-feed_weight = tf.placeholder(tf.float32, (params_model['batch'], None, None, 1)) # w_s0, w_att1
-feed_att = tf.placeholder(tf.int32, (params_model['batch'], None, None, 1)) # a0, a1
-feed_att_oracle = tf.placeholder(tf.int32, (1, None, None, 1)) # a01
+feed_img = tf.placeholder(tf.float32, (params_model['batch'], None, None, 3)) # f0, f1, f2, f3
+feed_seg = tf.placeholder(tf.int32, (params_model['batch'], None, None, 1)) # s0, s1, s2, s3
+feed_weight = tf.placeholder(tf.float32, (params_model['batch'], None, None, 1)) # w_s0, w_att1, w_s2, w_att3
+feed_att = tf.placeholder(tf.int32, (params_model['batch'], None, None, 1)) # a0, a1, a2, a3
+feed_att_oracle = tf.placeholder(tf.int32, (2, None, None, 1)) # a01, a23
 
 # display
 sum_img0 = tf.summary.image('img0', feed_img[0:1,:,:,:])
 sum_img1 = tf.summary.image('img1', feed_img[1:2,:,:,:])
-sum_att0 = tf.summary.image('f0_att', tf.cast(feed_att[0:1,:,:,:], tf.float16))
-sum_att01 = tf.summary.image('f01_att', tf.cast(feed_att_oracle, tf.float16))
-sum_att1 = tf.summary.image('f1_att', tf.cast(feed_att[1:2,:,:,:], tf.float16))
-sum_seg0 = tf.summary.image('f0_seg', tf.cast(feed_seg[0:1,:,:,:], tf.float16))
+sum_img2 = tf.summary.image('img2', feed_img[2:3,:,:,:])
+sum_img3 = tf.summary.image('img3', feed_img[3:4,:,:,:])
+sum_att0 = tf.summary.image('f0_att', tf.cast(feed_att[0:1,:,:,:], tf.float16)) # to gate f0
+sum_att01 = tf.summary.image('f01_att', tf.cast(feed_att_oracle[0:1,:,:,:], tf.float16)) # to gate f1
+sum_att1 = tf.summary.image('f1_att', tf.cast(feed_att[1:2,:,:,:], tf.float16)) # to prediction a1
+sum_att2 = tf.summary.image('f2_att', tf.cast(feed_att[2:3,:,:,:], tf.float16)) # to gate f2
+sum_att23 = tf.summary.image('f23_att', tf.cast(feed_att_oracle[1:2,:,:,:], tf.float16)) # to gate f3
+sum_att3 = tf.summary.image('f3_att', tf.cast(feed_att[3:4,:,:,:], tf.float16)) # to prediction a3
+sum_seg0 = tf.summary.image('f0_seg', tf.cast(feed_seg[0:1,:,:,:], tf.float16)) # to prediction s0
 sum_seg1 = tf.summary.image('f1_seg', tf.cast(feed_seg[1:2,:,:,:], tf.float16))
+sum_seg2 = tf.summary.image('f2_seg', tf.cast(feed_seg[2:3,:,:,:], tf.float16)) # to prediction s2
+sum_seg3 = tf.summary.image('f3_seg', tf.cast(feed_seg[3:4,:,:,:], tf.float16))
 sum_w_s0 = tf.summary.image('weight_s0', tf.cast(feed_weight[0:1,:,:,:], tf.float16))
 sum_w_att1 = tf.summary.image('weight_att1', tf.cast(feed_weight[1:2,:,:,:], tf.float16))
+sum_w_s2 = tf.summary.image('weight_s2', tf.cast(feed_weight[2:3,:,:,:], tf.float16))
+sum_w_att3 = tf.summary.image('weight_att3', tf.cast(feed_weight[3:4,:,:,:], tf.float16))
 
 # build network, on GPU by default
 model = resnet.ResNet(params_model)
-loss, bp_step, grad_acc_op = model.train(feed_img, feed_seg, feed_weight, feed_att, feed_att_oracle, acc_count, global_step)
+loss, bp_step = model.train(feed_img, feed_seg, feed_weight, feed_att, feed_att_oracle, acc_count, global_step)
 init_op = tf.global_variables_initializer()
 sum_all = tf.summary.merge_all()
 
@@ -115,20 +124,28 @@ with tf.Session() as sess:
                 # prepare data for a local step
                 f0 = seq_imgs[local_step]
                 f1 = seq_imgs[local_step+1]
+                f2 = seq_imgs[local_step+2]
+                f3 = seq_imgs[local_step+3]
                 s0 = seq_segs[local_step]
                 s1 = seq_segs[local_step+1]
-                f0, f1, s0, s1 = standardize(f0, f1, s0, s1) # dtype converted
-                a0, a1, a01 = ge_att_pairs(s0, s1)
+                s2 = seq_imgs[local_step+2]
+                s3 = seq_imgs[local_step+3]
+                f0, f1, f2, f3, s0, s1, s2, s3 = standardize(f0, f1, f2, f3, s0, s1, s2, s3) # dtype converted
+                a0, a1, a2, a3, a01, a23 = ge_att_pairs(s0, s1, s2, s3)
                 # resize/flip same for all frames to the current seq, returned all data has shape [H,W,C]
-                f0, f1, s0, s1, a0, a1, a01 = random_resize_flip(f0, f1, s0, s1, a0, a1, a01, flip_bool, scale_f)
-                w_s0, w_att1 = get_balance_weights(s0, a0, a1)
-                feed_dict_v = {feed_img: pack_reshape_batch(f0, f1),
-                               feed_seg: pack_reshape_batch(s0, s1),
-                               feed_weight: pack_reshape_batch(w_s0, w_att1),
-                               feed_att: pack_reshape_batch(a0, a1),
-                               feed_att_oracle: a01[np.newaxis, ...]}
+                f0, f1, f2, f3, s0, s1, s2, s3, a0, a1, a2, a3, a01, a23 = random_resize_flip(f0, f1, f2, f3,
+                                                                                              s0, s1, s2, s3,
+                                                                                              a0, a1, a2, a3,
+                                                                                              a01, a23,
+                                                                                              flip_bool, scale_f)
+                w_s0, w_att1, w_s2, w_att3 = get_balance_weights(s0, a0, a1, s2, a2, a3)
+                feed_dict_v = {feed_img: pack_reshape_batch(f0, f1, f2, f3),
+                               feed_seg: pack_reshape_batch(s0, s1, s2, s3),
+                               feed_weight: pack_reshape_batch(w_s0, w_att1, w_s2, w_att3),
+                               feed_att: pack_reshape_batch(a0, a1, a2, a3),
+                               feed_att_oracle: np.stack((a01, a23), axis=0)}
                 # compute loss and gradients
-                run_result = sess.run([loss, sum_all] + grad_acc_op, feed_dict=feed_dict_v)
+                run_result = sess.run([loss, sum_all], feed_dict=feed_dict_v)
                 loss_ = run_result[0]
                 sum_all_ = run_result[1]
                 # execute BP, increment global_step by 1 automatically

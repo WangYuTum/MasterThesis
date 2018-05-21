@@ -14,13 +14,38 @@ import sys
 def lstm_conv2d(data_format, input_tensor):
     '''
     :param data_format: 'NCHW' or 'NHWC'
-    :param input_tensor: [1,128,H,W] or [1,H,W,128]
+    :param input_tensor: [2,128,H,W] or [2,H,W,128], first dim indicates max_time
     :return: out of lstm [1,128,H,W] or [1,H,W,128]
     '''
 
-    #TODO
+    if data_format == "NCHW":
+        input_tensor = tf.transpose(input_tensor, [0,2,3,1]) # To NHWC
+    in_shape = tf.shape(input_tensor)
+    if tf.contrib.framework.get_name_scope().find('attention') != -1:
+        ker_shape = (7, 7) # large kernel shape for attention branch
+    else:
+        ker_shape = (1, 1) # small kernel shape for seg branch
+    input_tensor = tf.expand_dims(input_tensor, 0) # [1,2,h,w,128], [batch, time_max, h, w, 128]
+    lstm_cell = tf.contrib.rnn.Conv2DLSTMCell(conv_ndims=2,
+                                              input_shape=(2, in_shape[1], in_shape[2], in_shape[3]),
+                                              output_channels=128,
+                                              kernel_shape=ker_shape,
+                                              use_bias=True,    # default
+                                              skip_connection=False, # default
+                                              forget_bias=1.0,  # default
+                                              initializers=None,    # default
+                                              name='conv2dlstm')
+    zero_state = lstm_cell.zero_state(batch_size=1, dtype=tf.float32)
+    lstm_out, final_state = tf.nn.dynamic_rnn(cell=lstm_cell,
+                                              inputs=input_tensor,
+                                              sequence_length=2,
+                                              initial_state=zero_state,
+                                              dtype=tf.float32,
+                                              swap_memory=True)
+    # lstm_out has shape: [1,2,h,w,128]
+    lstm_out = tf.squeeze(lstm_out, 0)  # to [2,h,w,128]
 
-    return 1
+    return lstm_out
 
 
 def conv_layer(data_format, input_tensor, stride=1, padding='SAME', shape=None):
@@ -304,28 +329,35 @@ def param_lr():
     vars_lr['main/B4_1/conv2/kernel'] = 1.0
     vars_lr['main/B4_2/conv1/kernel'] = 1.0
     vars_lr['main/B4_2/conv2/kernel'] = 1.0
+    vars_lr['main/feat_reduce/kernel'] = 1.0
+    vars_lr['main/feat_reduce/bias'] = 2.0
 
-    vars_lr['main/B1_side_path/kernel'] = 1.0
-    vars_lr['main/B1_side_path/bias'] = 2.0
-    vars_lr['main/B2_side_path/kernel'] = 1.0
-    vars_lr['main/B2_side_path/bias'] = 2.0
-    vars_lr['main/B3_side_path/kernel'] = 1.0
-    vars_lr['main/B3_side_path/bias'] = 2.0
-    vars_lr['main/B4_side_path/kernel'] = 1.0
-    vars_lr['main/B4_side_path/bias'] = 2.0
+    # TODO
+    vars_lr['segmentation/seg_lstm2d/...'] = 1.0
+    vars_lr['segmentation/lstm2d_decode/kernel'] = 1.0
+    vars_lr['segmentation/B1_side_path/kernel'] = 1.0
+    vars_lr['segmentation/B1_side_path/bias'] = 2.0
+    vars_lr['segmentation/B2_side_path/kernel'] = 1.0
+    vars_lr['segmentation/B2_side_path/bias'] = 2.0
+    vars_lr['segmentation/B3_side_path/kernel'] = 1.0
+    vars_lr['segmentation/B3_side_path/bias'] = 2.0
+    vars_lr['segmentation/B4_side_path/kernel'] = 1.0
+    vars_lr['segmentation/B4_side_path/bias'] = 2.0
+    vars_lr['segmentation/lstm_decoded/kernel'] = 1.0
+    vars_lr['segmentation/lstm_decoded/bias'] = 2.0
+    vars_lr['segmentation/fuse/kernel'] = 0.01
+    vars_lr['segmentation/fuse/bias'] = 0.02
 
-    vars_lr['main/B1_side_sup/kernel'] = 0.1
-    vars_lr['main/B1_side_sup/bias'] = 0.2
-    vars_lr['main/B2_side_sup/kernel'] = 0.1
-    vars_lr['main/B2_side_sup/bias'] = 0.2
-    vars_lr['main/B3_side_sup/kernel'] = 0.1
-    vars_lr['main/B3_side_sup/bias'] = 0.2
-    vars_lr['main/B4_side_sup/kernel'] = 0.1
-    vars_lr['main/B4_side_sup/bias'] = 0.2
+    vars_lr['attention/fuse/kernel'] = 1.0
+    vars_lr['attention/fuse/bias'] = 2.0
+    vars_lr['attention/reduce/kernel'] = 1.0
+    vars_lr['attention/reduce/bias'] = 1.0
+    # TODO
+    vars_lr['attention/att_lstm/...'] = 1.0
+    vars_lr['attention/lstm2d_decode/kernel'] = 1.0
+    vars_lr['attention/up/kernel'] = 1.0
+    vars_lr['attention/up/bias'] = 1.0
 
-    vars_lr['main/fuse/kernel'] = 0.01
-    vars_lr['main/fuse/bias'] = 0.02
-    
     return vars_lr
 
 
