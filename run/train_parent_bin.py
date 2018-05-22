@@ -57,7 +57,6 @@ steps_per_seq = 33
 num_seq = 60
 total_steps = epochs * num_seq * steps_per_seq
 global_step = tf.Variable(0, name='global_step', trainable=False) # incremented automatically by 1 after each apply_gradients
-acc_count = 1
 save_ckpt_interval = 10000
 summary_write_interval = 2 # 50
 print_screen_interval = 1 # 20
@@ -91,7 +90,7 @@ sum_w_att3 = tf.summary.image('weight_att3', tf.cast(feed_weight[3:4,:,:,:], tf.
 
 # build network, on GPU by default
 model = resnet.ResNet(params_model)
-loss, bp_step = model.train(feed_img, feed_seg, feed_weight, feed_att, feed_att_oracle, acc_count, global_step)
+loss, bp_step = model.train(feed_img, feed_seg, feed_weight, feed_att, feed_att_oracle, global_step)
 init_op = tf.global_variables_initializer()
 sum_all = tf.summary.merge_all()
 
@@ -128,8 +127,8 @@ with tf.Session() as sess:
                 f3 = seq_imgs[local_step+3]
                 s0 = seq_segs[local_step]
                 s1 = seq_segs[local_step+1]
-                s2 = seq_imgs[local_step+2]
-                s3 = seq_imgs[local_step+3]
+                s2 = seq_segs[local_step+2]
+                s3 = seq_segs[local_step+3]
                 f0, f1, f2, f3, s0, s1, s2, s3 = standardize(f0, f1, f2, f3, s0, s1, s2, s3) # dtype converted
                 a0, a1, a2, a3, a01, a23 = ge_att_pairs(s0, s1, s2, s3)
                 # resize/flip same for all frames to the current seq, returned all data has shape [H,W,C]

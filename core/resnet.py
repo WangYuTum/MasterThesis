@@ -2,9 +2,6 @@
     The main structure of the network.
 
     NOTE: the code is still under developing.
-    TODO:
-        * Loss formulate
-        * Compute required theoretical memory footage
 '''
 
 from __future__ import division
@@ -122,21 +119,31 @@ class ResNet():
 
             shape_dict['feat_reduce'] = [1,1,1024,128]
             with tf.variable_scope('feat_reduce'):
-                model['feat_reduced'] = nn.conv_layer(self._data_format, model['B4_2'], 1, 'SAME',
-                                                      shape_dict['feat_reduce'])
-                model['feat_reduced'] = nn.bias_layer(self._data_format, model['feat_reduced'], 128)
-                model['feat_reduced'] = nn.ReLu_layer(model['feat_reduced'])
+                with tf.variable_scope('conv'):
+                    model['feat_reduced'] = nn.conv_layer(self._data_format, model['B4_2'], 1, 'SAME',
+                                                        shape_dict['feat_reduce'])
+                with tf.variable_scope('bias'):
+                    model['feat_reduced'] = nn.bias_layer(self._data_format, model['feat_reduced'], 128)
+                model['feat_reduced'] = nn.ReLu_layer(model['feat_reduced']) # [4,h,w,128] or [4,128,h,w]
 
-            f_0 = model['feat_reduced'][0:1,:,:,:] # [1,h,w,128] or [1,128,h,w]
-            f_1 = model['feat_reduced'][1:2,:,:,:] # [1,h,w,128] or [1,128,h,w]
-            f_2 = model['feat_reduced'][2:3,:,:,:]
-            f_3 = model['feat_reduced'][3:4,:,:,:]
+            # resize to fixed size
+            if self._data_format == "NCHW":
+                model['feat_reduced'] = tf.transpose(model['feat_reduced'], [0,2,3,1]) # To NHWC
+                model['feat_resized'] = tf.image.resize_images(model['feat_reduced'], [56, 30])
+                model['feat_resized'] = tf.transpose(model['feat_resized'], [0,3,1,2])  # To NCHW
+            else:
+                model['feat_resized'] = tf.image.resize_images(model['feat_reduced'], [56, 30])
+
+            f_0 = model['feat_resized'][0:1,:,:,:] # [1,56,30,128] or [1,128,56,30]
+            f_1 = model['feat_resized'][1:2,:,:,:] # [1,56,30,128] or [1,128,56,30]
+            f_2 = model['feat_resized'][2:3,:,:,:]
+            f_3 = model['feat_resized'][3:4,:,:,:]
 
         with tf.variable_scope('segmentation'):
             # go to conv2dLSTM
             f_0_2 = tf.concat([f_0, f_2], axis=0)
             with tf.variable_scope('seg_lstm2d'):
-                out_lstm2d_seg = nn.lstm_conv2d(self._data_format, f_0_2) # [2,h,w,128] or [2,128,h,w]
+                out_lstm2d_seg = nn.lstm_conv2d(self._data_format, f_0_2) # [2,56,30,128] or [2,128,56,30]
             shape_dict['lstm2d_decode'] = [1,1,128,128]
             with tf.variable_scope('lstm2d_decode'):
                 model['lstm2d_decode'] = nn.conv_layer(self._data_format, out_lstm2d_seg, 1,
@@ -182,13 +189,13 @@ class ResNet():
         with tf.variable_scope('attention'):
             # fuse visual features from f0 and f1
             if self._data_format == "NCHW":
-                dual_feat0 = tf.concat([model['lstm2d_decode'][0:1,:,:,:], f_1], axis=1) # [1,256,h,w]
-                dual_feat1 = tf.concat([model['lstm2d_decode'][1:2,:,:,:], f_3], axis=1)  # [1,256,h,w]
+                dual_feat0 = tf.concat([model['lstm2d_decode'][0:1,:,:,:], f_1], axis=1) # [1,256,56,30]
+                dual_feat1 = tf.concat([model['lstm2d_decode'][1:2,:,:,:], f_3], axis=1)  # [1,256,56,30]
             else:
-                dual_feat0 = tf.concat([model['lstm2d_decode'][0:1,:,:,:], f_1], axis=3)  # [1,256,h,w]
-                dual_feat1 = tf.concat([model['lstm2d_decode'][1:2,:,:,:], f_3], axis=3)  # [1,256,h,w]
+                dual_feat0 = tf.concat([model['lstm2d_decode'][0:1,:,:,:], f_1], axis=3)  # [1,256,56,30]
+                dual_feat1 = tf.concat([model['lstm2d_decode'][1:2,:,:,:], f_3], axis=3)  # [1,256,56,30]
             # fuse dual feat and reduce
-            dual_feats = tf.concat([dual_feat0, dual_feat1], axis=0) # [2,256,h,w] or [2,h,w,256]
+            dual_feats = tf.concat([dual_feat0, dual_feat1], axis=0) # [2,256,56,30] or [2,56,30,256]
             with tf.variable_scope('fuse'):
                 dual_feats = nn.conv_layer(self._data_format, dual_feats, 1, 'SAME', [1,1,256,256])
                 dual_feats = nn.bias_layer(self._data_format, dual_feats, 256)
@@ -198,14 +205,14 @@ class ResNet():
                 dual_feats = nn.bias_layer(self._data_format, dual_feats, 128)
                 dual_feats = nn.ReLu_layer(dual_feats)
             with tf.variable_scope('att_lstm'):
-                out_lstm2d_att = nn.lstm_conv2d(self._data_format, dual_feats) # [2,h,w,128] or [2,128,h,w]
+                out_lstm2d_att = nn.lstm_conv2d(self._data_format, dual_feats) # [2,56,30,128] or [2,128,56,30]
             with tf.variable_scope('lstm2d_decode'):
                 att_lstm_decode = nn.conv_layer(self._data_format, out_lstm2d_att, 1,
                                                 'SAME', [1,1,128,128])
             with tf.variable_scope('up'):
                 att_out = nn.conv_layer(self._data_format, att_lstm_decode, 1, 'SAME', [1,1,128,2])
                 att_out = nn.bias_layer(self._data_format, att_out, 2)
-                att_out = nn.conv_transpose(self._data_format, att_out, [16, 16], 16, 'SAME')
+                att_out = nn.conv_transpose(self._data_format, att_out, [2, 2], 16, 'SAME')
                 att_out = nn.crop_features(self._data_format, att_out, im_size)
 
         return att_out, seg_out
@@ -292,14 +299,13 @@ class ResNet():
         return loss
 
 
-    def train(self, feed_img, feed_seg, feed_weight, feed_att, feed_att_oracle, acc_count, global_step):
+    def train(self, feed_img, feed_seg, feed_weight, feed_att, feed_att_oracle, global_step):
         '''
         :param feed_img: [4,H,W,3], tf.float32; f0, f1, f2, f3
         :param feed_seg: [4,H,W,1], tf.int32; s0, s1, s2, s3
         :param feed_weight: [4,H,W,1], tf.float32; w_s0, w_att1, w_s2, w_att3
         :param feed_att: [4,H,W,1], tf.int32; a0, a1, a2, a3
         :param feed_att_oracle: [2,H,W,1], tf.int32; a01, a23
-        :param acc_count: default to 1
         :param global_step: keep track of global train step
         :return: total_loss, train_step_op, grad_acc_op
         '''

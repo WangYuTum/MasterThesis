@@ -36,6 +36,7 @@ import glob
 from scipy.ndimage.morphology import binary_dilation
 from scipy.ndimage import generate_binary_structure
 from scipy.misc import imsave
+from skimage.transform import resize
 from scipy.misc import toimage
 from scipy.misc import imread
 
@@ -89,7 +90,7 @@ class DAVIS_dataset():
         with open(self._seq_set) as t:
             seq_names = t.read().splitlines()  # e.g. [bike-packing, blackswan, ...]
         for i in range(len(seq_names)):
-            seq_path = os.path.join('../../DAVIS17_train_val/JPEGImages/480p', seq_names[i])
+            seq_path = os.path.join('../../../DAVIS17_train_val/JPEGImages/480p', seq_names[i])
             seq_paths.append(seq_path)
         print('Got {} seqs in total.'.format(len(seq_paths)))
 
@@ -100,6 +101,8 @@ class DAVIS_dataset():
         train_imgs = []
         train_gts = []
         num_seq = len(self._seq_paths)
+        # TODO, test purpose
+        num_seq = 5
         for seq_idx in range(num_seq):
             seq_imgs = []
             seq_gts = []
@@ -171,7 +174,9 @@ class DAVIS_dataset():
 
     def _get_random_seq_idx(self):
 
-        rand_seq_idx = np.random.permutation(self._permut_range)[0]
+        # TODO, test only
+        rand_seq_idx = np.random.permutation(5)[0]
+        # rand_seq_idx = np.random.permutation(self._permut_range)[0]
 
         return rand_seq_idx
 
@@ -262,10 +267,10 @@ def ge_att_pairs(s0, s1, s2, s3):
     struct1 = generate_binary_structure(2, 2)
     a0 = binary_dilation(s0, structure=struct1, iterations=30).astype(s0.dtype)
     a1 = binary_dilation(s1, structure=struct1, iterations=30).astype(s1.dtype)
-    a2 = binary_dilation(s2, structure=struct1, iterations=30).astype(s1.dtype)
-    a3 = binary_dilation(s3, structure=struct1, iterations=30).astype(s1.dtype)
+    a2 = binary_dilation(s2, structure=struct1, iterations=30).astype(s2.dtype)
+    a3 = binary_dilation(s3, structure=struct1, iterations=30).astype(s3.dtype)
     a01 = binary_dilation(s0, structure=struct1, iterations=40).astype(s0.dtype)
-    a23 = binary_dilation(s2, structure=struct1, iterations=40).astype(s0.dtype)
+    a23 = binary_dilation(s2, structure=struct1, iterations=40).astype(s2.dtype)
 
     return a0, a1, a2, a3, a01, a23
 
@@ -297,8 +302,10 @@ def random_resize_flip(f0, f1, f2, f3, s0, s1, s2, s3, a0, a1, a2, a3, a01, a23,
     img_W = np.shape(f0)[1]
     new_H = int(img_H * scale)
     new_W = int(img_W * scale)
+
     # PIL.Image.resize preserve range, Image.NEAREST, Image.BILINEAR
     # scipy.misc.imresize rescale to (0,255)
+
     f0_obj = Image.fromarray(stacked[:,:,0:3], mode='F')
     f0_obj.resize((new_H, new_W), Image.BILINEAR)
     f0 = np.array(f0_obj, np.float32)
@@ -436,7 +443,7 @@ def get_flip_bool():
 
 def get_scale():
 
-    rand_i = np.random.randint(6,13)
+    rand_i = np.random.randint(6,11)
     rand_scale = float(rand_i) / 10.0
 
     return rand_scale
