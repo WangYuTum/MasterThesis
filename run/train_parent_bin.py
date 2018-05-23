@@ -42,9 +42,9 @@ with tf.device('/cpu:0'):
 params_model = {
     'batch': 4, # feed consecutive images at once
     'l2_weight': 0.0002,
-    'init_lr': 1e-5, # original paper: 1e-8,
+    'init_lr': 1e-3, # original paper: 1e-8,
     'l1_att': 1e-4, # l1 sparsity on attention map
-    'data_format': 'NCHW', # optimal for cudnn
+    'data_format': 'NHWC', # optimal for cudnn
     'save_path': '../data/ckpts/attention_bin/att_bin.ckpt',
     'tsboard_logs': '../data/tsboard_logs/attention_bin/',
     'restore_imgnet': '../data/ckpts/imgnet.ckpt', # restore model from where
@@ -58,7 +58,7 @@ num_seq = 60
 total_steps = epochs * num_seq * steps_per_seq
 global_step = tf.Variable(0, name='global_step', trainable=False) # incremented automatically by 1 after each apply_gradients
 save_ckpt_interval = 10000
-summary_write_interval = 2 # 50
+summary_write_interval = 1 # 50
 print_screen_interval = 1 # 20
 
 # define placeholders
@@ -69,7 +69,7 @@ feed_att = tf.placeholder(tf.int32, (params_model['batch'], None, None, 1)) # a0
 feed_att_oracle = tf.placeholder(tf.int32, (2, None, None, 1)) # a01, a23
 
 # display
-sum_img0 = tf.summary.image('img0', feed_img[0:1,:,:,:])
+sum_img0 = tf.summary.image('img0', feed_img[0:1,:,:,:]) # e.g. [1, 480, 854, 3]
 sum_img1 = tf.summary.image('img1', feed_img[1:2,:,:,:])
 sum_img2 = tf.summary.image('img2', feed_img[2:3,:,:,:])
 sum_img3 = tf.summary.image('img3', feed_img[3:4,:,:,:])
@@ -107,7 +107,7 @@ with tf.Session() as sess:
     saver_img.restore(sess, params_model['restore_imgnet'])
     print('restored variables from {}'.format(params_model['restore_imgnet']))
     # set deconv filters
-    sess.run(set_conv_transpose_filters(tf.global_variables()))
+    # sess.run(set_conv_transpose_filters(tf.global_variables()))
     print('All weights initialized.')
 
     print("Starting training for {0} epochs, {1} total steps.".format(epochs, total_steps))
@@ -129,7 +129,6 @@ with tf.Session() as sess:
                 s1 = seq_segs[local_step+1]
                 s2 = seq_segs[local_step+2]
                 s3 = seq_segs[local_step+3]
-                f0, f1, f2, f3, s0, s1, s2, s3 = standardize(f0, f1, f2, f3, s0, s1, s2, s3) # dtype converted
                 a0, a1, a2, a3, a01, a23 = ge_att_pairs(s0, s1, s2, s3)
                 # resize/flip same for all frames to the current seq, returned all data has shape [H,W,C]
                 f0, f1, f2, f3, s0, s1, s2, s3, a0, a1, a2, a3, a01, a23 = random_resize_flip(f0, f1, f2, f3,
@@ -137,18 +136,20 @@ with tf.Session() as sess:
                                                                                               a0, a1, a2, a3,
                                                                                               a01, a23,
                                                                                               flip_bool, scale_f)
+                f0, f1, f2, f3, s0, s1, s2, s3, a0, a1, a2, a3, a01, a23 = standardize(f0, f1, f2, f3,
+                                                                                       s0, s1, s2, s3,
+                                                                                       a0, a1, a2, a3,
+                                                                                       a01, a23)  # dtype converted
                 w_s0, w_att1, w_s2, w_att3 = get_balance_weights(s0, a0, a1, s2, a2, a3)
                 feed_dict_v = {feed_img: pack_reshape_batch(f0, f1, f2, f3),
                                feed_seg: pack_reshape_batch(s0, s1, s2, s3),
                                feed_weight: pack_reshape_batch(w_s0, w_att1, w_s2, w_att3),
                                feed_att: pack_reshape_batch(a0, a1, a2, a3),
                                feed_att_oracle: np.stack((a01, a23), axis=0)}
-                # compute loss and gradients
-                run_result = sess.run([loss, sum_all], feed_dict=feed_dict_v)
+                # compute loss and execute BP, increment global_step by 1 automatically
+                run_result = sess.run([loss, sum_all, bp_step], feed_dict=feed_dict_v)
                 loss_ = run_result[0]
                 sum_all_ = run_result[1]
-                # execute BP, increment global_step by 1 automatically
-                sess.run(bp_step)
 
                 # save summary
                 if global_step.eval() % summary_write_interval == 0 and global_step.eval() != 0:

@@ -14,8 +14,8 @@ import sys
 def lstm_conv2d(data_format, input_tensor):
     '''
     :param data_format: 'NCHW' or 'NHWC'
-    :param input_tensor: [2,128,56,30] or [2,56,30,128], first dim indicates max_time
-    :return: out of lstm [2,128,56,30] or [2,56,30,128]
+    :param input_tensor: [2,128,30,56] or [2,30,56,128], first dim indicates max_time
+    :return: out of lstm [2,128,30,56] or [2,30,56,128]
     '''
 
     scope_name = tf.get_variable_scope().name
@@ -27,8 +27,8 @@ def lstm_conv2d(data_format, input_tensor):
         ker_shape = [3, 3] # large kernel shape for attention branch
     else:
         ker_shape = [1, 1] # small kernel shape for seg branch
-    input_tensor = tf.expand_dims(input_tensor, 0) # [1,2,56,30,128], [batch, time_max, h, w, 128]
-    lstm_cell = tf.contrib.rnn.Conv2DLSTMCell(input_shape=[56, 30, 128],
+    input_tensor = tf.expand_dims(input_tensor, 0) # [1,2,30,56,128], [batch, time_max, h, w, 128]
+    lstm_cell = tf.contrib.rnn.Conv2DLSTMCell(input_shape=[30, 56, 128],
                                               output_channels=128,
                                               kernel_shape=ker_shape,
                                               use_bias=True,    # default
@@ -37,15 +37,15 @@ def lstm_conv2d(data_format, input_tensor):
                                               initializers=None,    # default
                                               name='conv2dlstm')
     zero_state = lstm_cell.zero_state(batch_size=1, dtype=tf.float32)
-    #input_tensor = tf.reshape(input_tensor, [1,2,56,30,128])
+    #input_tensor = tf.reshape(input_tensor, [1,2,30,56,128])
     lstm_out, final_state = tf.nn.dynamic_rnn(cell=lstm_cell,
                                               inputs=input_tensor,
                                               sequence_length=[2],
                                               initial_state=zero_state,
                                               dtype=tf.float32,
                                               swap_memory=True)
-    # lstm_out has shape: [1,2,56,30,128]
-    lstm_out = tf.squeeze(lstm_out, 0)  # to [2,56,30,128]
+    # lstm_out has shape: [1,2,30,56,128]
+    lstm_out = tf.squeeze(lstm_out, 0)  # to [2,30,56,128]
     # change back to required data_format
     if data_format == "NCHW":
         lstm_out = tf.transpose(lstm_out, [0,3,1,2])

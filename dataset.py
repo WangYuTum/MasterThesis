@@ -230,10 +230,11 @@ class DAVIS_dataset():
 #        (done) - Dilate gts to get attention map
 
 
-def standardize(f0, f1, f2, f3, s0, s1, s2, s3):
+def standardize(f0, f1, f2, f3, s0, s1, s2, s3, a0, a1, a2, a3, a01, a23):
     '''
     :param f0, f1, f2, f3: RGB img, shape [H,W,3], np.uint8
-    :param s0, s1, s2, s3: Seg_gt, binary mask, shape [H,W], np.uint8
+    :param s0, s1, s2, s3: Seg_gt, binary mask, shape [H,W,1], np.uint8
+    :param a0, a1, a2, a3, a01, a23: Att_mask, binary, shape [H,W,1], np.uint8
     :return: standardized, datatype converted
     '''
 
@@ -245,6 +246,12 @@ def standardize(f0, f1, f2, f3, s0, s1, s2, s3):
     s1 = s1.astype(np.int32)
     s2 = s2.astype(np.int32)
     s3 = s3.astype(np.int32)
+    a0 = a0.astype(np.int32)
+    a1 = a1.astype(np.int32)
+    a2 = a2.astype(np.int32)
+    a3 = a3.astype(np.int32)
+    a01 = a01.astype(np.int32)
+    a23 = a23.astype(np.int32)
 
     f0 -= data_mean
     f0 /= data_std
@@ -255,13 +262,13 @@ def standardize(f0, f1, f2, f3, s0, s1, s2, s3):
     f3 -= data_mean
     f3 /= data_std
 
-    return f0, f1, f2, f3, s0, s1, s2, s3
+    return f0, f1, f2, f3, s0, s1, s2, s3, a0, a1, a2, a3, a01, a23
 
 
 def ge_att_pairs(s0, s1, s2, s3):
     '''
-    :param s0, s1, s2, s3: Seg_gt for f0, binary mask, shape [H,W], np.int32
-    :return: a0, a1, a2, a3, a01, a23: shape [H,W], np.int32
+    :param s0, s1, s2, s3: Seg_gt for f0, binary mask, shape [H,W], np.uint8
+    :return: a0, a1, a2, a3, a01, a23: shape [H,W], np.uint8
     '''
 
     struct1 = generate_binary_structure(2, 2)
@@ -280,13 +287,13 @@ def random_resize_flip(f0, f1, f2, f3, s0, s1, s2, s3, a0, a1, a2, a3, a01, a23,
     NOTE: This function must be applied to every frame for a particular sequence,
     each sequence might (not)flip and has different scale of resize.
 
-    :param f0, f1, f2, f3: RGB img, [H,W,3], np.float32
-    :param s0, s1, s2, s3: Seg_gt, binary, shape [H,W], np.int32
-    :param a0, a1, a2, a3: Att_gt, binary, shape [H,W], np.int32
-    :param a01, a23: Attention oracle, binary, shape [H,W], np.int32
+    :param f0, f1, f2, f3: RGB img, [H,W,3], np.uint8
+    :param s0, s1, s2, s3: Seg_gt, binary, shape [H,W], np.uint8
+    :param a0, a1, a2, a3: Att_gt, binary, shape [H,W], np.uint8
+    :param a01, a23: Attention oracle, binary, shape [H,W], np.uint8
     :param flip: Boolen, flip or not
     :param scale: np.float32, range: [0.6-1.2], the resize scale
-    :return: all resized/fliped together
+    :return: all resized/fliped together, dtype unchanged, binary shapes to [H,W,1]
     '''
 
     # stack them, converted to np.float32, [H,W,22]
@@ -306,61 +313,61 @@ def random_resize_flip(f0, f1, f2, f3, s0, s1, s2, s3, a0, a1, a2, a3, a01, a23,
     # PIL.Image.resize preserve range, Image.NEAREST, Image.BILINEAR
     # scipy.misc.imresize rescale to (0,255)
 
-    f0_obj = Image.fromarray(stacked[:,:,0:3], mode='F')
+    f0_obj = Image.fromarray(stacked[:,:,0:3], mode='RGB')
     f0_obj.resize((new_H, new_W), Image.BILINEAR)
-    f0 = np.array(f0_obj, np.float32)
+    f0 = np.array(f0_obj, f0.dtype)
 
-    f1_obj = Image.fromarray(stacked[:,:,3:6], mode='F')
+    f1_obj = Image.fromarray(stacked[:,:,3:6], mode='RGB')
     f1_obj.resize((new_H, new_W), Image.BILINEAR)
-    f1 = np.array(f1_obj, np.float32)
+    f1 = np.array(f1_obj, f1.dtype)
 
-    f2_obj = Image.fromarray(stacked[:,:,6:9], mode='F')
+    f2_obj = Image.fromarray(stacked[:,:,6:9], mode='RGB')
     f2_obj.resize((new_H, new_W), Image.BILINEAR)
-    f2 = np.array(f2_obj, np.float32)
+    f2 = np.array(f2_obj, f2.dtype)
 
-    f3_obj = Image.fromarray(stacked[:,:,9:12], mode='F')
+    f3_obj = Image.fromarray(stacked[:,:,9:12], mode='RGB')
     f3_obj.resize((new_H, new_W), Image.BILINEAR)
-    f3 = np.array(f3_obj, np.float32)
+    f3 = np.array(f3_obj, f3.dtype)
 
-    s0_obj = Image.fromarray(stacked[:,:,12:13], mode='I')
+    s0_obj = Image.fromarray(np.squeeze(stacked[:,:,12:13]), mode='L')
     s0_obj.resize((new_H, new_W), Image.NEAREST)
-    s0 = np.array(s0_obj, np.int32)
+    s0 = np.array(s0_obj, s0.dtype)[..., np.newaxis]
 
-    s1_obj = Image.fromarray(stacked[:,:,13:14], mode='I')
+    s1_obj = Image.fromarray(np.squeeze(stacked[:,:,13:14]), mode='L')
     s1_obj.resize((new_H, new_W), Image.NEAREST)
-    s1 = np.array(s1_obj, np.int32)
+    s1 = np.array(s1_obj, s1.dtype)[..., np.newaxis]
 
-    s2_obj = Image.fromarray(stacked[:,:,14:15], mode='I')
+    s2_obj = Image.fromarray(np.squeeze(stacked[:,:,14:15]), mode='L')
     s2_obj.resize((new_H, new_W), Image.NEAREST)
-    s2 = np.array(s2_obj, np.int32)
+    s2 = np.array(s2_obj, s2.dtype)[..., np.newaxis]
 
-    s3_obj = Image.fromarray(stacked[:,:,15:16], mode='I')
+    s3_obj = Image.fromarray(np.squeeze(stacked[:,:,15:16]), mode='L')
     s3_obj.resize((new_H, new_W), Image.NEAREST)
-    s3 = np.array(s3_obj, np.int32)
+    s3 = np.array(s3_obj, s3.dtype)[..., np.newaxis]
 
-    a0_obj = Image.fromarray(stacked[:,:,16:17], mode='I')
+    a0_obj = Image.fromarray(np.squeeze(stacked[:,:,16:17]), mode='L')
     a0_obj.resize((new_H, new_W), Image.NEAREST)
-    a0 = np.array(a0_obj, np.int32)
+    a0 = np.array(a0_obj, a0.dtype)[..., np.newaxis]
 
-    a1_obj = Image.fromarray(stacked[:,:,17:18], mode='I')
+    a1_obj = Image.fromarray(np.squeeze(stacked[:,:,17:18]), mode='L')
     a1_obj.resize((new_H, new_W), Image.NEAREST)
-    a1 = np.array(a1_obj, np.int32)
+    a1 = np.array(a1_obj, a1.dtype)[..., np.newaxis]
 
-    a2_obj = Image.fromarray(stacked[:,:,18:19], mode='I')
+    a2_obj = Image.fromarray(np.squeeze(stacked[:,:,18:19]), mode='L')
     a2_obj.resize((new_H, new_W), Image.NEAREST)
-    a2 = np.array(a2_obj, np.int32)
+    a2 = np.array(a2_obj, a2.dtype)[..., np.newaxis]
 
-    a3_obj = Image.fromarray(stacked[:,:,19:20], mode='I')
+    a3_obj = Image.fromarray(np.squeeze(stacked[:,:,19:20]), mode='L')
     a3_obj.resize((new_H, new_W), Image.NEAREST)
-    a3 = np.array(a3_obj, np.int32)
+    a3 = np.array(a3_obj, a3.dtype)[..., np.newaxis]
 
-    a01_obj = Image.fromarray(stacked[:,:,20:21], mode='I')
+    a01_obj = Image.fromarray(np.squeeze(stacked[:,:,20:21]), mode='L')
     a01_obj.resize((new_H, new_W), Image.NEAREST)
-    a01 = np.array(a01_obj, np.int32)
+    a01 = np.array(a01_obj, a01.dtype)[..., np.newaxis]
 
-    a23_obj = Image.fromarray(stacked[:,:,21:22], mode='I')
+    a23_obj = Image.fromarray(np.squeeze(stacked[:,:,21:22]), mode='L')
     a23_obj.resize((new_H, new_W), Image.NEAREST)
-    a23 = np.array(a23_obj, np.int32)
+    a23 = np.array(a23_obj, a23.dtype)[..., np.newaxis]
 
     return f0, f1, f2, f3, s0, s1, s2, s3, a0, a1, a2, a3, a01, a23
 

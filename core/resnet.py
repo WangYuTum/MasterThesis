@@ -129,13 +129,13 @@ class ResNet():
             # resize to fixed size
             if self._data_format == "NCHW":
                 model['feat_reduced'] = tf.transpose(model['feat_reduced'], [0,2,3,1]) # To NHWC
-                model['feat_resized'] = tf.image.resize_images(model['feat_reduced'], [56, 30])
+                model['feat_resized'] = tf.image.resize_images(model['feat_reduced'], [30, 56])
                 model['feat_resized'] = tf.transpose(model['feat_resized'], [0,3,1,2])  # To NCHW
             else:
-                model['feat_resized'] = tf.image.resize_images(model['feat_reduced'], [56, 30])
+                model['feat_resized'] = tf.image.resize_images(model['feat_reduced'], [30, 56])
 
-            f_0 = model['feat_resized'][0:1,:,:,:] # [1,56,30,128] or [1,128,56,30]
-            f_1 = model['feat_resized'][1:2,:,:,:] # [1,56,30,128] or [1,128,56,30]
+            f_0 = model['feat_resized'][0:1,:,:,:] # [1,30,56,128] or [1,128,30,56]
+            f_1 = model['feat_resized'][1:2,:,:,:] # [1,30,56,128] or [1,128,30,56]
             f_2 = model['feat_resized'][2:3,:,:,:]
             f_3 = model['feat_resized'][3:4,:,:,:]
 
@@ -143,38 +143,49 @@ class ResNet():
             # go to conv2dLSTM
             f_0_2 = tf.concat([f_0, f_2], axis=0)
             with tf.variable_scope('seg_lstm2d'):
-                out_lstm2d_seg = nn.lstm_conv2d(self._data_format, f_0_2) # [2,56,30,128] or [2,128,56,30]
+                out_lstm2d_seg = nn.lstm_conv2d(self._data_format, f_0_2) # [2,30,56,128] or [2,128,30,56]
             shape_dict['lstm2d_decode'] = [1,1,128,128]
             with tf.variable_scope('lstm2d_decode'):
                 model['lstm2d_decode'] = nn.conv_layer(self._data_format, out_lstm2d_seg, 1,
                                                        'SAME', shape_dict['lstm2d_decode'])
 
             # aggregate all feature on diff levels
+            # CNN part has batch of 4, while lstm has batch of 2,
+            # extract f0, f2 from CNN part for segmentation branch backprop
             with tf.variable_scope('B1_side_path'):
-                side_2 = nn.conv_layer(self._data_format, model['B1_2'], 1, 'SAME', [3, 3, 128, 16])
+                B1_f02 = tf.concat([model['B1_2'][0:1,:,:,:], model['B1_2'][2:3,:,:,:]],axis=0)
+                side_2 = nn.conv_layer(self._data_format, B1_f02, 1, 'SAME', [3, 3, 128, 16])
                 side_2 = nn.bias_layer(self._data_format, side_2, 16)
-                side_2_f = nn.conv_transpose(self._data_format, side_2, [16, 16], 2, 'SAME')
-                side_2_f = nn.crop_features(self._data_format, side_2_f, im_size)
+                side_2_f = tf.image.resize_images(side_2, [im_size[1], im_size[2]])
+                # side_2_f = nn.conv_transpose(self._data_format, side_2, [16, 16], 2, 'SAME')
+                # side_2_f = nn.crop_features(self._data_format, side_2_f, im_size)
             with tf.variable_scope('B2_side_path'):
-                side_4 = nn.conv_layer(self._data_format, model['B2_2'], 1, 'SAME', [3, 3, 256, 16])
+                B2_f02 = tf.concat([model['B2_2'][0:1, :, :, :], model['B2_2'][2:3, :, :, :]], axis=0)
+                side_4 = nn.conv_layer(self._data_format, B2_f02, 1, 'SAME', [3, 3, 256, 16])
                 side_4 = nn.bias_layer(self._data_format, side_4, 16)
-                side_4_f = nn.conv_transpose(self._data_format, side_4, [16, 16], 4, 'SAME')
-                side_4_f = nn.crop_features(self._data_format, side_4_f, im_size)
+                side_4_f = tf.image.resize_images(side_4, [im_size[1], im_size[2]])
+                # side_4_f = nn.conv_transpose(self._data_format, side_4, [16, 16], 4, 'SAME')
+                # side_4_f = nn.crop_features(self._data_format, side_4_f, im_size)
             with tf.variable_scope('B3_side_path'):
-                side_8 = nn.conv_layer(self._data_format, model['B3_5'], 1, 'SAME', [3, 3, 512, 16])
+                B3_f02 = tf.concat([model['B3_5'][0:1, :, :, :], model['B3_5'][2:3, :, :, :]], axis=0)
+                side_8 = nn.conv_layer(self._data_format, B3_f02, 1, 'SAME', [3, 3, 512, 16])
                 side_8 = nn.bias_layer(self._data_format, side_8, 16)
-                side_8_f = nn.conv_transpose(self._data_format, side_8, [16, 16], 8, 'SAME')
-                side_8_f = nn.crop_features(self._data_format, side_8_f, im_size)
+                side_8_f = tf.image.resize_images(side_8, [im_size[1], im_size[2]])
+                # side_8_f = nn.conv_transpose(self._data_format, side_8, [16, 16], 8, 'SAME')
+                # side_8_f = nn.crop_features(self._data_format, side_8_f, im_size)
             with tf.variable_scope('B4_side_path'):
-                side_16 = nn.conv_layer(self._data_format, model['B4_2'], 1, 'SAME', [3, 3, 1024, 16])
+                B4_f02 = tf.concat([model['B4_2'][0:1, :, :, :], model['B4_2'][2:3, :, :, :]], axis=0)
+                side_16 = nn.conv_layer(self._data_format, B4_f02, 1, 'SAME', [3, 3, 1024, 16])
                 side_16 = nn.bias_layer(self._data_format, side_16, 16)
-                side_16_f = nn.conv_transpose(self._data_format, side_16, [16, 16], 16, 'SAME')
-                side_16_f = nn.crop_features(self._data_format, side_16_f, im_size)
+                side_16_f = tf.image.resize_images(side_16, [im_size[1], im_size[2]])
+                # side_16_f = nn.conv_transpose(self._data_format, side_16, [16, 16], 16, 'SAME')
+                # side_16_f = nn.crop_features(self._data_format, side_16_f, im_size)
             with tf.variable_scope('lstm_decoded'):
                 side_lstm = nn.conv_layer(self._data_format, model['lstm2d_decode'], 1, 'SAME', [3, 3, 128, 16])
                 side_lstm = nn.bias_layer(self._data_format, side_lstm, 16)
-                side_lstm_f = nn.conv_transpose(self._data_format, side_lstm, [16, 16], 16, 'SAME')
-                side_lstm_f = nn.crop_features(self._data_format, side_lstm_f, im_size)
+                side_lstm_f = tf.image.resize_images(side_lstm, [im_size[1], im_size[2]])
+                # side_lstm_f = nn.conv_transpose(self._data_format, side_lstm, [16, 16], 16, 'SAME')
+                # side_lstm_f = nn.crop_features(self._data_format, side_lstm_f, im_size)
 
             # concat and linearly fuse
             if self._data_format == "NCHW":
@@ -189,13 +200,13 @@ class ResNet():
         with tf.variable_scope('attention'):
             # fuse visual features from f0 and f1
             if self._data_format == "NCHW":
-                dual_feat0 = tf.concat([model['lstm2d_decode'][0:1,:,:,:], f_1], axis=1) # [1,256,56,30]
-                dual_feat1 = tf.concat([model['lstm2d_decode'][1:2,:,:,:], f_3], axis=1)  # [1,256,56,30]
+                dual_feat0 = tf.concat([model['lstm2d_decode'][0:1,:,:,:], f_1], axis=1) # [1,256,30,56]
+                dual_feat1 = tf.concat([model['lstm2d_decode'][1:2,:,:,:], f_3], axis=1)  # [1,256,30,56]
             else:
-                dual_feat0 = tf.concat([model['lstm2d_decode'][0:1,:,:,:], f_1], axis=3)  # [1,256,56,30]
-                dual_feat1 = tf.concat([model['lstm2d_decode'][1:2,:,:,:], f_3], axis=3)  # [1,256,56,30]
+                dual_feat0 = tf.concat([model['lstm2d_decode'][0:1,:,:,:], f_1], axis=3)  # [1,256,30,56]
+                dual_feat1 = tf.concat([model['lstm2d_decode'][1:2,:,:,:], f_3], axis=3)  # [1,256,30,56]
             # fuse dual feat and reduce
-            dual_feats = tf.concat([dual_feat0, dual_feat1], axis=0) # [2,256,56,30] or [2,56,30,256]
+            dual_feats = tf.concat([dual_feat0, dual_feat1], axis=0) # [2,256,56,30] or [2,30,56,256]
             with tf.variable_scope('fuse'):
                 dual_feats = nn.conv_layer(self._data_format, dual_feats, 1, 'SAME', [1,1,256,256])
                 dual_feats = nn.bias_layer(self._data_format, dual_feats, 256)
@@ -212,8 +223,9 @@ class ResNet():
             with tf.variable_scope('up'):
                 att_out = nn.conv_layer(self._data_format, att_lstm_decode, 1, 'SAME', [1,1,128,2])
                 att_out = nn.bias_layer(self._data_format, att_out, 2)
-                att_out = nn.conv_transpose(self._data_format, att_out, [2, 2], 16, 'SAME')
-                att_out = nn.crop_features(self._data_format, att_out, im_size)
+                att_out = tf.image.resize_images(att_out, [im_size[1], im_size[2]])
+                # att_out = nn.conv_transpose(self._data_format, att_out, [2, 2], 16, 'SAME')
+                # att_out = nn.crop_features(self._data_format, att_out, im_size)
 
         return att_out, seg_out
 
@@ -231,7 +243,7 @@ class ResNet():
         att0_mask = tf.cast(atts[0:1,:,:,:], tf.float32)
         att2_mask = tf.cast(atts[1:2,:,:,:], tf.float32)
         att_oracle_mask1 = tf.cast(att_oracle[0:1,:,:,:], tf.float32)
-        att_oracle_mask3 = tf.cast(att_oracle[1:2, :, :, :], tf.float32)
+        att_oracle_mask3 = tf.cast(att_oracle[1:2,:,:,:], tf.float32)
         # Gate
         gated_f0 = tf.multiply(images[0:1,:,:,:], att0_mask)
         gated_f1 = tf.multiply(images[1:2,:,:,:], att_oracle_mask1)
@@ -251,7 +263,7 @@ class ResNet():
 
         loss = self._balanced_cross_entropy(input_tensor=att_out,
                                             labels=att_gt,
-                                            weight=att_weight)
+                                            weight=att_weight) * 0.1
         tf.summary.scalar('att_loss', loss)
 
         return loss
@@ -266,19 +278,39 @@ class ResNet():
         att_prob = tf.nn.softmax(att_out)[:,:,:,1:2] # [2,h,w,1]
         loss1 = tf.norm(att_prob[0:1,:,:,:], ord=1) * self._l1_att
         loss3 = tf.norm(att_prob[1:2,:,:,:], ord=1) * self._l1_att
-        loss = (loss1 + loss3) / 2.0
+        loss = 0.0001  * (loss1 + loss3) / 2.0
         tf.summary.scalar('att_sparsity', loss)
 
         return loss
 
-    # def _att_coverage(self, att_out, seg_gt):
-    #     '''
-    #     :param att_out: logits, [1,H,W,2] or [1,2,H,W], tf.float32
-    #     :param seg_gt: [1,H,W,1], tf.int32
-    #     :return: scalar, coverage over seg_gt, tf.float32
-    #     '''
-    #
-    #     pass
+    def _att_coverage(self, att_out, seg_gt):
+        '''
+        :param att_out: logits, [2,H,W,2] or [2,2,H,W], tf.float32
+        :param seg_gt: [2,H,W,1], tf.int32
+        :return: scalar, coverage over seg_gt, tf.float32
+
+        NOTE: Consider seq of length 2 for now.
+        '''
+
+        if self._data_format == "NCHW":
+            att_out = tf.transpose(att_out, [0,2,3,1]) # To NHWC
+        seg_gt = tf.cast(seg_gt, tf.float32)
+        att_prob = tf.nn.softmax(att_out)
+        att_prob1 = att_prob[0:1,:,:,1:2] # [1,h,w,1]
+        att_prob1 = tf.multiply(att_prob1, seg_gt[0:1,:,:,:])
+        att_prob1 = tf.minimum(att_prob1, 0.7) # probability >= 0.7 will not contrib to loss
+        # coverage ratio cannot exceed 1.5
+        ratio_cover1 = tf.minimum(tf.reduce_sum(att_prob1)/tf.reduce_sum(seg_gt[0:1,:,:,:]), 1.5)
+
+        att_prob2 = att_prob[1:2,:,:,1:2] # [1,h,w,1]
+        att_prob2 = tf.multiply(att_prob2, seg_gt[1:2,:,:,:])
+        att_prob2 = tf.minimum(att_prob2, 0.7)
+        ratio_cover2 = tf.minimum(tf.reduce_sum(att_prob2) / tf.reduce_sum(seg_gt[1:2,:,:,:]), 1.5)
+
+        loss = -(tf.log(ratio_cover1) + tf.log(ratio_cover2)) / 2.0
+        tf.summary.scalar('att_cover', loss)
+
+        return loss
 
     def _seg_loss(self, seg_out, seg_gt, seg_weight):
         '''
@@ -298,7 +330,6 @@ class ResNet():
 
         return loss
 
-
     def train(self, feed_img, feed_seg, feed_weight, feed_att, feed_att_oracle, global_step):
         '''
         :param feed_img: [4,H,W,3], tf.float32; f0, f1, f2, f3
@@ -307,7 +338,7 @@ class ResNet():
         :param feed_att: [4,H,W,1], tf.int32; a0, a1, a2, a3
         :param feed_att_oracle: [2,H,W,1], tf.int32; a01, a23
         :param global_step: keep track of global train step
-        :return: total_loss, train_step_op, grad_acc_op
+        :return: total_loss, train_step_op
         '''
 
         att_02 = tf.concat([feed_att[0:1,:,:,:], feed_att[2:3,:,:,:]], axis=0) # [2,h,w,1]
@@ -316,12 +347,13 @@ class ResNet():
         att_13 = tf.concat([feed_att[1:2,:,:,:], feed_att[3:4,:,:,:]], axis=0) # [2,h,w,1]
         weight_13 = tf.concat([feed_weight[1:2,:,:,:], feed_weight[3:4,:,:,:]], axis=0) # [2,h,w,1]
         feed_seg02 = tf.concat([feed_seg[0:1,:,:,:], feed_seg[2:3,:,:,:]], axis=0)
-        feed_weight02 = tf.concat([feed_weight[0:1,:,:,:] ,feed_weight[2:3,:,:,:]], axis=0)
+        feed_seg13 = tf.concat([feed_seg[1:2,:,:,:], feed_seg[3:4,:,:,:]], axis=0)
+        weight02 = tf.concat([feed_weight[0:1,:,:,:] ,feed_weight[2:3,:,:,:]], axis=0)
         total_loss = self._att_loss(att_out, att_13, weight_13) \
                     + self._att_sparsity(att_out) \
-                    + self._seg_loss(seg_out, feed_seg02, feed_weight02) \
-                    + self._l2_loss()
-        #            + self._att_coverage(att_out, feed_seg[1:2, :, :, :]) \
+                    + self._seg_loss(seg_out, feed_seg02, weight02) \
+                    + self._l2_loss() \
+                    + self._att_coverage(att_out, feed_seg13)
         tf.summary.scalar('total_loss', total_loss)
 
         # display current output
