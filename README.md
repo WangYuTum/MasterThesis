@@ -3,6 +3,17 @@
 ## Attention on single object
 The branch test attention mechanism on single object.
 
+## ISSUES
+* RNN resolution might be too low
+* Loss unstable
+ * Loss might be sensitive to object size
+ * Attention sparsity (remove or modify)
+* Resize features at the end of CNN might make accurate mask localisation difficult
+
+## TODO
+* Fine-tune during inference
+ 
+
 ## Build Enviroment (no sudo privilege)
 * Ubuntu 16.04
 * Python 2.7.12
