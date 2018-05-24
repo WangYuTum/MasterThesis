@@ -42,24 +42,24 @@ with tf.device('/cpu:0'):
 params_model = {
     'batch': 4, # feed consecutive images at once
     'l2_weight': 0.0002,
-    'init_lr': 1e-3, # original paper: 1e-8,
+    'init_lr': 1e-4, # original paper: 1e-8,
     'l1_att': 1e-4, # l1 sparsity on attention map
     'data_format': 'NHWC', # optimal for cudnn
-    'save_path': '../data/ckpts/attention_bin/att_bin.ckpt',
-    'tsboard_logs': '../data/tsboard_logs/attention_bin/',
+    'save_path': '../data/ckpts/attention_bin/two-stream-complete/att_bin.ckpt',
+    'tsboard_logs': '../data/tsboard_logs/attention_bin/two-stream-complete/',
     'restore_imgnet': '../data/ckpts/imgnet.ckpt', # restore model from where
-    'restore_parent_bin': '../data/ckpts/attention_bin/att_bin.ckpt-xxx'
+    'restore_parent_bin': '../data/ckpts/attention_bin/two-stream-complete/att_bin.ckpt-xxx'
 }
 # define epochs
-epochs = 10
+epochs = 30
 frames_per_seq = 100
 steps_per_seq = 33
 num_seq = 60
 total_steps = epochs * num_seq * steps_per_seq
 global_step = tf.Variable(0, name='global_step', trainable=False) # incremented automatically by 1 after each apply_gradients
-save_ckpt_interval = 10000
-summary_write_interval = 1 # 50
-print_screen_interval = 1 # 20
+save_ckpt_interval = 15000
+summary_write_interval = 50 # 50
+print_screen_interval = 20 # 20
 
 # define placeholders
 feed_img = tf.placeholder(tf.float32, (params_model['batch'], None, None, 3)) # f0, f1, f2, f3

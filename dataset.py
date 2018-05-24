@@ -101,8 +101,6 @@ class DAVIS_dataset():
         train_imgs = []
         train_gts = []
         num_seq = len(self._seq_paths)
-        # TODO, test purpose
-        num_seq = 5
         for seq_idx in range(num_seq):
             seq_imgs = []
             seq_gts = []
@@ -174,9 +172,7 @@ class DAVIS_dataset():
 
     def _get_random_seq_idx(self):
 
-        # TODO, test only
-        rand_seq_idx = np.random.permutation(5)[0]
-        # rand_seq_idx = np.random.permutation(self._permut_range)[0]
+        rand_seq_idx = np.random.permutation(self._permut_range)[0]
 
         return rand_seq_idx
 

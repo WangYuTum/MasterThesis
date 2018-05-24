@@ -278,7 +278,7 @@ class ResNet():
         att_prob = tf.nn.softmax(att_out)[:,:,:,1:2] # [2,h,w,1]
         loss1 = tf.norm(att_prob[0:1,:,:,:], ord=1) * self._l1_att
         loss3 = tf.norm(att_prob[1:2,:,:,:], ord=1) * self._l1_att
-        loss = 0.0001  * (loss1 + loss3) / 2.0
+        loss = 0.001  * (loss1 + loss3) / 2.0
         tf.summary.scalar('att_sparsity', loss)
 
         return loss
