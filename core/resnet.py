@@ -1,7 +1,7 @@
 '''
     The main structure of the network.
 
-    NOTE: the code is still under developing.
+    NOTE: Only train CNN-part of the complete model as a new branch.
 '''
 
 from __future__ import division
