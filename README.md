@@ -1,7 +1,12 @@
 # MasterThesis
 
 ## Attention on single object
-The branch test attention mechanism on single object.
+A sub-branch of Attention-bin.
+Train full-sized images (batch=4) seq by seq only using CNN part (including feature reduce/resize).
+
+## TODO
+A sub-branch of Attention-bin.
+Train gated iamges (batch=4) seq by seq only using CNN part (including feature reduce/resize).
 
 ## Build Enviroment (no sudo privilege)
 * Ubuntu 16.04
