@@ -226,11 +226,10 @@ class DAVIS_dataset():
 #        (done) - Dilate gts to get attention map
 
 
-def standardize(f0, f1, f2, f3, s0, s1, s2, s3, a0, a1, a2, a3, a01, a23):
+def standardize(f0, f1, f2, f3, s0, s1, s2, s3):
     '''
     :param f0, f1, f2, f3: RGB img, shape [H,W,3], np.uint8
     :param s0, s1, s2, s3: Seg_gt, binary mask, shape [H,W,1], np.uint8
-    :param a0, a1, a2, a3, a01, a23: Att_mask, binary, shape [H,W,1], np.uint8
     :return: standardized, datatype converted
     '''
 
@@ -242,12 +241,6 @@ def standardize(f0, f1, f2, f3, s0, s1, s2, s3, a0, a1, a2, a3, a01, a23):
     s1 = s1.astype(np.int32)
     s2 = s2.astype(np.int32)
     s3 = s3.astype(np.int32)
-    a0 = a0.astype(np.int32)
-    a1 = a1.astype(np.int32)
-    a2 = a2.astype(np.int32)
-    a3 = a3.astype(np.int32)
-    a01 = a01.astype(np.int32)
-    a23 = a23.astype(np.int32)
 
     f0 -= data_mean
     f0 /= data_std
@@ -258,7 +251,7 @@ def standardize(f0, f1, f2, f3, s0, s1, s2, s3, a0, a1, a2, a3, a01, a23):
     f3 -= data_mean
     f3 /= data_std
 
-    return f0, f1, f2, f3, s0, s1, s2, s3, a0, a1, a2, a3, a01, a23
+    return f0, f1, f2, f3, s0, s1, s2, s3
 
 
 def ge_att_pairs(s0, s1, s2, s3):
@@ -278,15 +271,13 @@ def ge_att_pairs(s0, s1, s2, s3):
     return a0, a1, a2, a3, a01, a23
 
 
-def random_resize_flip(f0, f1, f2, f3, s0, s1, s2, s3, a0, a1, a2, a3, a01, a23,flip, scale):
+def random_resize_flip(f0, f1, f2, f3, s0, s1, s2, s3, flip, scale):
     '''
     NOTE: This function must be applied to every frame for a particular sequence,
     each sequence might (not)flip and has different scale of resize.
 
     :param f0, f1, f2, f3: RGB img, [H,W,3], np.uint8
     :param s0, s1, s2, s3: Seg_gt, binary, shape [H,W], np.uint8
-    :param a0, a1, a2, a3: Att_gt, binary, shape [H,W], np.uint8
-    :param a01, a23: Attention oracle, binary, shape [H,W], np.uint8
     :param flip: Boolen, flip or not
     :param scale: np.float32, range: [0.6-1.2], the resize scale
     :return: all resized/fliped together, dtype unchanged, binary shapes to [H,W,1]
@@ -295,10 +286,7 @@ def random_resize_flip(f0, f1, f2, f3, s0, s1, s2, s3, a0, a1, a2, a3, a01, a23,
     # stack them, converted to np.float32, [H,W,22]
     stacked = np.concatenate((f0, f1, f2, f3,
                               s0[..., np.newaxis], s1[..., np.newaxis],
-                              s2[..., np.newaxis], s3[..., np.newaxis],
-                              a0[..., np.newaxis], a1[..., np.newaxis],
-                              a2[..., np.newaxis], a3[..., np.newaxis],
-                              a01[..., np.newaxis], a23[..., np.newaxis]), axis=-1)
+                              s2[..., np.newaxis], s3[..., np.newaxis]), axis=-1)
     if flip:
         stacked = np.fliplr(stacked)
     img_H = np.shape(f0)[0]
@@ -341,31 +329,7 @@ def random_resize_flip(f0, f1, f2, f3, s0, s1, s2, s3, a0, a1, a2, a3, a01, a23,
     s3_obj.resize((new_H, new_W), Image.NEAREST)
     s3 = np.array(s3_obj, s3.dtype)[..., np.newaxis]
 
-    a0_obj = Image.fromarray(np.squeeze(stacked[:,:,16:17]), mode='L')
-    a0_obj.resize((new_H, new_W), Image.NEAREST)
-    a0 = np.array(a0_obj, a0.dtype)[..., np.newaxis]
-
-    a1_obj = Image.fromarray(np.squeeze(stacked[:,:,17:18]), mode='L')
-    a1_obj.resize((new_H, new_W), Image.NEAREST)
-    a1 = np.array(a1_obj, a1.dtype)[..., np.newaxis]
-
-    a2_obj = Image.fromarray(np.squeeze(stacked[:,:,18:19]), mode='L')
-    a2_obj.resize((new_H, new_W), Image.NEAREST)
-    a2 = np.array(a2_obj, a2.dtype)[..., np.newaxis]
-
-    a3_obj = Image.fromarray(np.squeeze(stacked[:,:,19:20]), mode='L')
-    a3_obj.resize((new_H, new_W), Image.NEAREST)
-    a3 = np.array(a3_obj, a3.dtype)[..., np.newaxis]
-
-    a01_obj = Image.fromarray(np.squeeze(stacked[:,:,20:21]), mode='L')
-    a01_obj.resize((new_H, new_W), Image.NEAREST)
-    a01 = np.array(a01_obj, a01.dtype)[..., np.newaxis]
-
-    a23_obj = Image.fromarray(np.squeeze(stacked[:,:,21:22]), mode='L')
-    a23_obj.resize((new_H, new_W), Image.NEAREST)
-    a23 = np.array(a23_obj, a23.dtype)[..., np.newaxis]
-
-    return f0, f1, f2, f3, s0, s1, s2, s3, a0, a1, a2, a3, a01, a23
+    return f0, f1, f2, f3, s0, s1, s2, s3
 
 
 def get_att_balance_weight(mask):
@@ -407,22 +371,21 @@ def get_seg_balance_weight(seg, att):
     return mat_weight
 
 
-def get_balance_weights(s0, a0, a1, s2, a2, a3):
+def get_balance_weights(s0, s1, s2, s3):
     '''
     :param s0: segmentation gt for f0, [H,W,1], np.int32
-    :param a0: attention gt for f0, [H,W,1], np.int32
-    :param a1: attention gt for a1, [H,W,1], np.int32
+    :param s1: attention gt for a1, [H,W,1], np.int32
     :param s2: segmentation gt for f2, [H,W,1], np.int32
-    :param a2: attention gt for f2, [H,W,1], np.int32
-    :param a3: attention gt for a3, [H,W,1], np.int32
-    :return: weight matrix for s0, a1, s2, a3; shape/dtype doesn't change
+    :param s3: attention gt for a3, [H,W,1], np.int32
+    :return: weight matrix for s0, s1, s2, s3; shape/dtype doesn't change
     '''
-    w_s0 = get_seg_balance_weight(s0, a0)
-    w_att1 = get_att_balance_weight(a1)
-    w_s2 = get_seg_balance_weight(s2, a2)
-    w_att3 = get_att_balance_weight(a3)
 
-    return w_s0, w_att1, w_s2, w_att3
+    w_s0 = get_att_balance_weight(s0)
+    w_s1 = get_att_balance_weight(s1)
+    w_s2 = get_att_balance_weight(s2)
+    w_s3 = get_att_balance_weight(s3)
+
+    return w_s0, w_s1, w_s2, w_s3
 
 
 def pack_reshape_batch(b0, b1, b2, b3):
