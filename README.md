@@ -6,11 +6,13 @@ The branch test attention mechanism on single object.
 ## ISSUES
 * RNN resolution might be too low
 * Loss unstable
- * Loss might be sensitive to object size
- * Attention sparsity (remove or modify)
+  * Loss might be sensitive to object size
+  * Attention sparsity (remove or modify)
 * Resize features at the end of CNN might make accurate mask localisation difficult
 
 ## TODO
+* Train seq with overlapping
+* Train longer seq
 * Fine-tune during inference
  
 
