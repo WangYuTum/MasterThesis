@@ -52,6 +52,8 @@ class DAVIS_dataset():
         # Init params
         self._mode = params.get('mode', None)
         self._seq_set = params.get('seq_set', None) # e.g. '../../../DAVIS17_train_val/ImageSets/2017/train.txt'
+        self._seq_path = params.get('seq_path', None) # used in inference
+        self._val_seq_frames = None # used in inference
 
         # some statistics about the data
         self._max_train_len = 100
@@ -63,25 +65,27 @@ class DAVIS_dataset():
         # self._data_mean = np.array([115.195829334, 114.927476686, 107.725750308]).reshape((1,1,3))
         # self._data_std = np.array([64.5572961827, 63.0172054007, 67.0494050908]).reshape((1,1,3))
 
-        if self._seq_set is None:
-            sys.exit('Must specify a set in txt format.')
         if self._mode is None:
             sys.exit('Must specify a mode.')
         elif self._mode == 'train':
+            if self._seq_set is None:
+                sys.exit('Must specify a set in txt format.')
             self._seq_paths = self._load_seq_path()
             self._train_imgs, self._train_gts = self._get_train_data()
             # check length
             if len(self._train_imgs) != len(self._train_gts) or len(self._train_imgs) == 0:
                 sys.exit('Train imgs/gts length do not match.')
         elif self._mode == 'val':
-            self._seq_paths = self._load_seq_path()
-            self._val_imgs, self._val_gts = self._get_val_data()
-            if len(self._val_imgs) != len(self._val_gts) or len(self._val_imgs) == 0:
-                sys.exit('Val imgs/gts length do not match.')
+            if self._seq_path is None:
+                sys.exit('Must specify seq_path in mode {}'.format(self._mode))
+            else:
+                self._val_seq_frames = self._get_val_frames()
+                print('Got {0} frames for seq {1}'.format(len(self._val_seq_frames), self._seq_path))
         else:
             sys.exit('Not supported mode.')
 
-        self._permut_range = len(self._seq_paths)
+        if self._mode == 'train':
+            self._permut_range = len(self._seq_paths)
         print('Data loaded.')
 
     def _load_seq_path(self):
@@ -170,6 +174,28 @@ class DAVIS_dataset():
 
         return val_imgs, val_gts
 
+    def _get_val_frames(self):
+        '''
+        Example self._seq_path: 'DAVIS_root/JPEGImages/480p/bike-packing'
+        :return: A list of numpy image arrays
+        '''
+
+        seq_frames = []
+        search_seq_imgs = os.path.join(self._seq_path, "*.jpg")
+        files_seq = glob.glob(search_seq_imgs)
+        files_seq.sort()
+        num_frames = len(files_seq)
+        if num_frames == 0:
+            sys.exit("Got no frames for seq {}".format(self._seq_path))
+        for i in range(num_frames):
+            frame = np.array(Image.open(files_seq[i])).astype(np.float32)
+            # stardardize
+            frame -= data_mean
+            frame /= data_std
+            seq_frames.append(frame)
+
+        return seq_frames
+
     def _get_random_seq_idx(self):
 
         rand_seq_idx = np.random.permutation(self._permut_range)[0]
@@ -186,10 +212,10 @@ class DAVIS_dataset():
 
     def get_one_shot_pair(self):
         '''
-        :return: [img, gt, weight] for the one-shot fine-tuning of the self._seq
+        :return: [img, gt, weight] for the one-shot fine-tuning of the self._val_seq_frames
         '''
         pair = []
-        pair.append(self._seq[0])
+        pair.append(self._val_seq_frames[0])
 
         gt_path = os.path.join(self._seq_path.replace('JPEGImages','Annotations'), '00000.png')
         gt = np.array(Image.open(gt_path), dtype=np.int8)
@@ -215,7 +241,7 @@ class DAVIS_dataset():
 
     def get_test_frames(self):
 
-        frame_list = self._seq[1:]
+        frame_list = self._val_seq_frames[1:]
 
         return frame_list
 

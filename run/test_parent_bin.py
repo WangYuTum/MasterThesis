@@ -8,9 +8,7 @@ import tensorflow as tf
 sys.path.append("..")
 from dataset import DAVIS_dataset
 from core import resnet
-from core.nn import set_conv_transpose_filters
 from scipy.misc import imsave
-from tensorflow.python import debug as tf_debug
 
 # parse argument
 arg_fine_tune = int(sys.argv[1])
@@ -23,7 +21,7 @@ FINE_TUNE_seq = arg_fine_tune_seq # max 30
 SUP = 0
 
 # config device
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 config_gpu = tf.ConfigProto()
 config_gpu.gpu_options.per_process_gpu_memory_fraction = 0.6
 
@@ -39,7 +37,7 @@ print('Got {} val seqs in total.'.format(len(val_seq_paths)))
 
 # config dataset params (480p images)
 params_data = {
-    'mode': 'parent_finetune_binary',
+    'mode': 'val',
     'seq_path': val_seq_paths[FINE_TUNE_seq],
 }
 
@@ -65,24 +63,24 @@ if FINE_TUNE == 1:
     params_model = {
         'batch': 1,
         'l2_weight': 0.0002,
-        'init_lr': 1e-5, # original paper: 1e-8, can be further tuned
-        'data_format': 'NCHW', # optimal for cudnn
-        'save_path': '../data/ckpts/fine-tune/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt',
-        'tsboard_logs': '../data/tsboard_logs/fine-tune/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1],
-        'restore_parent_bin': '../data/ckpts/parent-sup-no-bn/parent_binary_train.ckpt-90000'
+        'init_lr': 1e-4, # original paper: 1e-8, can be further tuned
+        'data_format': 'NHWC', # optimal for cudnn
+        'save_path': '../data/ckpts/fine-tune/attention_bin/CNN-part-full-img/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt',
+        'tsboard_logs': '../data/tsboard_logs/fine-tune/attention_bin/CNN-part-full-img/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1],
+        'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-full-img/att_bin.ckpt-90000'
     }
-    global_iters = 500 # original paper: 500
+    global_iters = 1000 # original paper: 500
     save_ckpt_interval = 500
     summary_write_interval = 10
     print_screen_interval = 10
-    acc_count = 1 # since only fine-tune on single image
     global_step = tf.Variable(0, name='global_step',
                               trainable=False)  # incremented automatically by 1 after each apply_gradients
 else:
     params_model = {
         'batch': 1,
-        'data_format': 'NCHW',  # optimal for cudnn
-        'restore_fine-tune_bin': '../data/ckpts/fine-tune/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt-90500',
+        'data_format': 'NHWC',  # optimal for cudnn
+        #'restore_fine-tune_bin': '../data/ckpts/attention_bin/CNN-part-full-img/att_bin.ckpt-90000',
+        'restore_fine-tune_bin': '../data/ckpts/fine-tune/attention_bin/CNN-part-full-img/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt-91000',
         'save_result_path': '../data/results/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]
     }
 
@@ -95,7 +93,7 @@ if FINE_TUNE == 1:
 # build network, on GPU by default
 model = resnet.ResNet(params_model)
 if FINE_TUNE == 1:
-    loss, step, grad_acc_op = model.train(feed_img, feed_one_shot_gt, feed_one_shot_weight, SUP, acc_count, global_step)
+    loss, step= model.train(feed_img, feed_one_shot_gt, feed_one_shot_weight, global_step)
     init_op = tf.global_variables_initializer()
     sum_all = tf.summary.merge_all()
     # define Saver
@@ -124,7 +122,6 @@ with tf.Session(config=config_gpu) as sess:
         saver_test.restore(sess, params_model['restore_fine-tune_bin'])
         print('restored variables from {}'.format(params_model['restore_fine-tune_bin']))
     # set deconv filters
-    sess.run(set_conv_transpose_filters(tf.global_variables()))
     print('All weights initialized.')
 
     # starting fine-tuning/testing
@@ -137,13 +134,10 @@ with tf.Session(config=config_gpu) as sess:
             feed_one_shot_weight: train_gt_weight[2][np.newaxis,:]
         }
         for iter_step in range(global_iters):
-            # acc gradient
-            for _ in range(acc_count):
-                run_result = sess.run([loss, sum_all] + grad_acc_op, feed_dict=feed_dict_v)
-                loss_ = run_result[0]
-                sum_all_ = run_result[1]
             # execute BP
-            sess.run(step)
+            run_result = sess.run([loss, sum_all, step], feed_dict=feed_dict_v)
+            loss_ = run_result[0]
+            sum_all_ = run_result[1]
 
             if global_step.eval() % summary_write_interval == 0:
                 sum_writer.add_summary(sum_all_, global_step.eval())
