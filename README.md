@@ -3,10 +3,16 @@
 ## Attention on single object
 A sub-branch of Attention-bin.
 Train full-sized images (batch=4) seq by seq only using CNN part (including feature reduce/resize).
+* Test on val set (without fine-tune)
+  * Mean J: 0.175
+  * Mean F: 0.139
+* Test on val set(with fine-tune, 1000 iters, 1e-4)
+  * Mean J: 0.449
+  * Mean F: 0.385
 
 ## TODO
 A sub-branch of Attention-bin.
-Train gated iamges (batch=4) seq by seq only using CNN part (including feature reduce/resize).
+Train full images out of order only using CNN part (including feature reduce/resize).
 
 ## Build Enviroment (no sudo privilege)
 * Ubuntu 16.04
