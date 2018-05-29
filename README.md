@@ -10,6 +10,9 @@ The branch test attention mechanism on single object.
   * Attention sparsity (remove or modify)
 * Resize features at the end of CNN might make accurate mask localisation difficult
 
+## DONE
+* Inference without fine-tune
+
 ## TODO
 * Train seq with overlapping
 * Train longer seq
