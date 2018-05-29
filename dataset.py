@@ -1,7 +1,7 @@
 '''
     The data pipeline for DAVIS single object attention network.
 
-    Goal: loading all frames into memory and randomly choose one sequence during training
+    Goal: loading all frames into memory and randomly choose one image at a time
 
     Implementation Note: Video frames stored as a list of list:
         - Images: [seq0, seq1, ...], where seqx = [img0, img1, ...]
@@ -40,8 +40,10 @@ from skimage.transform import resize
 from scipy.misc import toimage
 from scipy.misc import imread
 
-data_mean = np.array([115.195829334, 114.927476686, 107.725750308]).reshape((1,1,3))
-data_std = np.array([64.5572961827, 63.0172054007, 67.0494050908]).reshape((1,1,3))
+# data_mean = np.array([115.195829334, 114.927476686, 107.725750308]).reshape((1,1,3))
+# data_std = np.array([64.5572961827, 63.0172054007, 67.0494050908]).reshape((1,1,3))
+data_mean = np.array([0.485, 0.456, 0.406]).reshape((1,1,3)).astype(np.float32) # the ILSVRC mean, in rgb
+data_std = np.array([0.229, 0.224, 0.225]).reshape((1,1,3)).astype(np.float32) # the ILSVRC std, in rgb
 
 class DAVIS_dataset():
     def __init__(self, params):
@@ -85,7 +87,8 @@ class DAVIS_dataset():
             sys.exit('Not supported mode.')
 
         if self._mode == 'train':
-            self._permut_range = len(self._seq_paths)
+            self._permut_range_seq = len(self._seq_paths)
+            self._permut_range_frame = self._max_train_len
         print('Data loaded.')
 
     def _load_seq_path(self):
@@ -146,6 +149,52 @@ class DAVIS_dataset():
 
         return train_imgs, train_gts
 
+    def get_a_random_sample(self):
+        '''
+        :return: img [1, h, w, 3] float32, seg [1, h, w, 1] int32, weight [1, h, w, 1] float32
+        '''
+
+        # choose an image randomly
+        seq_imgs, seq_gts = self.get_random_seq() # [img0, img1, ...], [seq0, seq1, ...], both np.uint8
+        rand_frame_idx = np.random.permutation(self._permut_range_frame)[0]
+        img = seq_imgs[rand_frame_idx] # [h, w, 3], np.uint8
+        seg = seq_gts[rand_frame_idx] # [h,w], np.uint8
+
+        # random resize/flip
+        stacked = np.concatenate((img, seg[..., np.newaxis]), axis=-1) # [h, w, 4]
+        if get_flip_bool():
+            stacked = np.fliplr(stacked)
+        img_H = np.shape(img)[0]
+        img_W = np.shape(img)[1]
+        scale = get_scale()
+        new_H = int(img_H * scale)
+        new_W = int(img_W * scale)
+
+        img_obj = Image.fromarray(stacked[:, :, 0:3], mode='RGB')
+        img_obj.resize((new_H, new_W), Image.BILINEAR)
+        img = np.array(img_obj, img.dtype) # [h, w, 3], np.uint8
+
+        seg_obj = Image.fromarray(np.squeeze(stacked[:, :, 3:4]), mode='L')
+        seg_obj.resize((new_H, new_W), Image.NEAREST)
+        seg = np.array(seg_obj, seg.dtype)[..., np.newaxis] # [h, w, 1], np.uint8
+
+        # standardize
+        img = img.astype(np.float32) * 1.0 / 255.0
+        img -= data_mean
+        img /= data_std
+        seg = seg.astype(np.int32)
+
+        # get balance weight
+        weight = get_att_balance_weight(seg) # [h,w,1]
+
+        # reshape
+        img = img[np.newaxis, ...]
+        seg = seg[np.newaxis, ...]
+        weight = weight[np.newaxis, ...]
+
+        return img, seg, weight
+
+
     def _get_val_data(self):
 
         val_imgs = []
@@ -198,7 +247,7 @@ class DAVIS_dataset():
 
     def _get_random_seq_idx(self):
 
-        rand_seq_idx = np.random.permutation(self._permut_range)[0]
+        rand_seq_idx = np.random.permutation(self._permut_range_seq)[0]
 
         return rand_seq_idx
 

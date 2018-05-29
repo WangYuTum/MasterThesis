@@ -26,23 +26,23 @@ class ResNet():
         self._batch = params.get('batch', 1)
         self._l2_weight = params.get('l2_weight', 0.0002)
         self._init_lr = params.get('init_lr', 1e-5)
-        self._base_decay = params.get('base_decay', 1.0)
-        self._sup_decay = params.get('sup_decay', 0.1)
-        self._fuse_decay = params.get('fuse_decay', 0.01)
+        # self._base_decay = params.get('base_decay', 1.0)
+        # self._sup_decay = params.get('sup_decay', 0.1)
+        # self._fuse_decay = params.get('fuse_decay', 0.01)
 
         if self._data_format is not "NCHW" and self._data_format is not "NHWC":
             sys.exit("Invalid data format. Must be either 'NCHW' or 'NHWC'.")
 
     def _build_model(self, images):
         '''
-        :param images: [4,H,W,3], tf.float32, f0, f1, f2, f3
+        :param images: [1,H,W,3], tf.float32
         :return: segmentation output before softmax
         '''
         model = {}
 
+        im_size = tf.shape(images)
         if self._data_format == "NCHW":
             images = tf.transpose(images, [0,3,1,2])    # [N,C,H,W]
-        im_size = tf.shape(images)
 
         ## The following 'main' scope is the primary (shared) feature layers, downsampling 16x
         shape_dict = {}
@@ -125,29 +125,54 @@ class ResNet():
                     model['feat_resized'] = tf.image.resize_images(model['feat_reduced'], [30, 56])
                     model['feat_resized'] = tf.transpose(model['feat_resized'], [0,3,1,2])  # To NCHW
                 else:
-                    model['feat_resized'] = tf.image.resize_images(model['feat_reduced'], [30, 56])
+                    model['feat_resized'] = tf.image.resize_images(model['feat_reduced'], [30, 56]) # NHWC
 
             # aggregate all feature on diff levels
             with tf.variable_scope('B1_side_path'):
                 side_2 = nn.conv_layer(self._data_format, model['B1_2'], 1, 'SAME', [3, 3, 128, 16])
                 side_2 = nn.bias_layer(self._data_format, side_2, 16)
-                side_2_f = tf.image.resize_images(side_2, [im_size[1], im_size[2]])
+                if self._data_format == "NCHW":
+                    side_2 = tf.transpose(side_2, [0,2,3,1]) # To NHWC
+                    side_2_f = tf.image.resize_images(side_2, [im_size[1], im_size[2]]) # NHWC
+                    side_2_f = tf.transpose(side_2_f, [0,3,1,2]) # To NCHW
+                else:
+                    side_2_f = tf.image.resize_images(side_2, [im_size[1], im_size[2]])  # NHWC
             with tf.variable_scope('B2_side_path'):
                 side_4 = nn.conv_layer(self._data_format, model['B2_2'], 1, 'SAME', [3, 3, 256, 16])
                 side_4 = nn.bias_layer(self._data_format, side_4, 16)
-                side_4_f = tf.image.resize_images(side_4, [im_size[1], im_size[2]])
+                if self._data_format == "NCHW":
+                    side_4 = tf.transpose(side_4, [0, 2, 3, 1])  # To NHWC
+                    side_4_f = tf.image.resize_images(side_4, [im_size[1], im_size[2]]) # NHWC
+                    side_4_f = tf.transpose(side_4_f, [0, 3, 1, 2])  # To NCHW
+                else:
+                    side_4_f = tf.image.resize_images(side_4, [im_size[1], im_size[2]]) # NHWC
             with tf.variable_scope('B3_side_path'):
                 side_8 = nn.conv_layer(self._data_format, model['B3_5'], 1, 'SAME', [3, 3, 512, 16])
                 side_8 = nn.bias_layer(self._data_format, side_8, 16)
-                side_8_f = tf.image.resize_images(side_8, [im_size[1], im_size[2]])
+                if self._data_format == "NCHW":
+                    side_8 = tf.transpose(side_8, [0, 2, 3, 1])  # To NHWC
+                    side_8_f = tf.image.resize_images(side_8, [im_size[1], im_size[2]]) # NHWC
+                    side_8_f = tf.transpose(side_8_f, [0, 3, 1, 2])  # To NCHW
+                else:
+                    side_8_f = tf.image.resize_images(side_8, [im_size[1], im_size[2]]) # NHWC
             with tf.variable_scope('B4_side_path'):
                 side_16 = nn.conv_layer(self._data_format, model['B4_2'], 1, 'SAME', [3, 3, 1024, 16])
                 side_16 = nn.bias_layer(self._data_format, side_16, 16)
-                side_16_f = tf.image.resize_images(side_16, [im_size[1], im_size[2]])
-            with tf.variable_scope('lstm_decoded'):
+                if self._data_format == "NCHW":
+                    side_16 = tf.transpose(side_16, [0, 2, 3, 1])  # To NHWC
+                    side_16_f = tf.image.resize_images(side_16, [im_size[1], im_size[2]]) # NHWC
+                    side_16_f = tf.transpose(side_16_f, [0, 3, 1, 2])  # To NCHW
+                else:
+                    side_16_f = tf.image.resize_images(side_16, [im_size[1], im_size[2]])  # NHWC
+            with tf.variable_scope('resize_side_path'):
                 side_reduced = nn.conv_layer(self._data_format, model['feat_resized'], 1, 'SAME', [3, 3, 128, 16])
                 side_reduced = nn.bias_layer(self._data_format, side_reduced, 16)
-                side_reduced_f = tf.image.resize_images(side_reduced, [im_size[1], im_size[2]])
+                if self._data_format == "NCHW":
+                    side_reduced = tf.transpose(side_reduced, [0, 2, 3, 1])  # To NHWC
+                    side_reduced_f = tf.image.resize_images(side_reduced, [im_size[1], im_size[2]]) # NHWC
+                    side_reduced_f = tf.transpose(side_reduced_f, [0, 3, 1, 2])  # To NCHW
+                else:
+                    side_reduced_f = tf.image.resize_images(side_reduced, [im_size[1], im_size[2]])  # NHWC
 
             # concat and linearly fuse
             if self._data_format == "NCHW":
@@ -175,17 +200,17 @@ class ResNet():
 
         return loss
 
-    def train(self, feed_img, feed_seg, feed_weight, global_step):
+    def train(self, feed_img, feed_seg, feed_weight, global_step, acc_count):
         '''
-        :param feed_img: [4,H,W,3], tf.float32; f0, f1, f2, f3
-        :param feed_seg: [4,H,W,1], tf.int32; s0, s1, s2, s3
-        :param feed_weight: [4,H,W,1], tf.float32; w_s0, w_s1, w_s2, w_s3
+        :param feed_img: [1,H,W,3], tf.float32
+        :param feed_seg: [1,H,W,1], tf.int32
+        :param feed_weight: [1,H,W,1], tf.float32
         :param global_step: keep track of global train step
-        :return: total_loss, train_step_op
+        :param acc_count: number of accumulated gradients
+        :return: total_loss, train_step_op, grad_acc_op
         '''
 
-        seg_out = self._build_model(feed_img)
-        # seg_out shape: [4,H,W,2] or [4,2,H,W] with original input image size
+        seg_out = self._build_model(feed_img) # seg_out shape: [1,H,W,2] or [1,2,H,W] with original input image size
         total_loss = self._seg_loss(seg_out, feed_seg, feed_weight) \
                      + self._l2_loss()
         tf.summary.scalar('total_loss', total_loss)
@@ -195,27 +220,42 @@ class ResNet():
             seg_pred = tf.transpose(seg_out, [0,2,3,1])
         else:
             seg_pred = seg_out
-        tf.summary.image('seg_pred0', tf.cast(tf.nn.softmax(seg_pred[0:1,:,:,:])[:,:,:,1:2], tf.float16))
-        tf.summary.image('seg_pred1', tf.cast(tf.nn.softmax(seg_pred[1:2,:,:,:])[:,:,:,1:2], tf.float16))
-        tf.summary.image('seg_pred2', tf.cast(tf.nn.softmax(seg_pred[2:3,:,:,:])[:,:,:,1:2], tf.float16))
-        tf.summary.image('seg_pred3', tf.cast(tf.nn.softmax(seg_pred[3:4,:,:,:])[:,:,:,1:2], tf.float16))
+        tf.summary.image('pred', tf.cast(tf.nn.softmax(seg_pred)[:, :, :, 1:2], tf.float16))
 
-        train_step_op = tf.train.AdamOptimizer(self._init_lr).minimize(total_loss, global_step=global_step)
+        bp_step, grad_acc_op = self._optimize(total_loss, acc_count, global_step)
 
-        return total_loss, train_step_op
+        return total_loss, bp_step, grad_acc_op
 
-    def test(self, images):
+    def _optimize(self, loss, acc_count, global_step):
         '''
-        :param images: batchs/single image have shape [batch, H, W, 3]
-        :return: probability map, binary mask
+        :param loss: the network loss
+        :return: a train op, a grad_acc_op
         '''
-        net_out = self._build_model(images) # [batch, 2, H, W] or [batch, H, W, 2]
-        if self._data_format == "NCHW":
-            net_out = tf.transpose(net_out, [0, 2, 3, 1])
-        prob_map = tf.nn.softmax(net_out) # [batch, H, W, 2]
-        pred_mask = tf.argmax(prob_map, axis=3, output_type=tf.int32)  # [batch, H, W]
 
-        return prob_map[:,:,:,1:], pred_mask
+        optimizer = tf.train.AdamOptimizer(self._init_lr)
+        grads_vars = optimizer.compute_gradients(loss)
+
+        # create grad accumulator for each variable-grad pair
+        grad_accumulator = {}
+        for idx in range(len(grads_vars)):
+            if grads_vars[idx][0] is not None:
+                grad_accumulator[idx] = tf.ConditionalAccumulator(grads_vars[idx][0].dtype)
+        # apply gradient to each grad accumulator
+        layer_lr = nn.param_lr()
+        grad_accumulator_op = []
+        for var_idx, grad_acc in grad_accumulator.iteritems():
+            var_name = str(grads_vars[var_idx][1].name).split(':')[0]
+            var_grad = grads_vars[var_idx][0]
+            grad_accumulator_op.append(grad_acc.apply_grad(var_grad * layer_lr[var_name], local_step=global_step))
+        # take average gradients for each variable after accumulating count reaches
+        mean_grads_vars = []
+        for var_idx, grad_acc in grad_accumulator.iteritems():
+            mean_grads_vars.append((grad_acc.take_grad(acc_count), grads_vars[var_idx][1]))
+
+        # apply average gradients to variables
+        update_op = optimizer.apply_gradients(mean_grads_vars, global_step=global_step)
+
+        return update_op, grad_accumulator_op
 
     def _balanced_cross_entropy(self, input_tensor, labels, weight):
         '''
@@ -246,3 +286,16 @@ class ResNet():
         tf.summary.scalar('l2_loss', loss)
 
         return loss
+
+    def test(self, images):
+        '''
+        :param images: batchs/single image have shape [batch, H, W, 3]
+        :return: probability map, binary mask
+        '''
+        net_out = self._build_model(images) # [batch, 2, H, W] or [batch, H, W, 2]
+        if self._data_format == "NCHW":
+            net_out = tf.transpose(net_out, [0, 2, 3, 1])
+        prob_map = tf.nn.softmax(net_out) # [batch, H, W, 2]
+        pred_mask = tf.argmax(prob_map, axis=3, output_type=tf.int32)  # [batch, H, W]
+
+        return prob_map[:,:,:,1:], pred_mask

@@ -337,34 +337,23 @@ def param_lr():
     vars_lr['main/B4_1/conv2/kernel'] = 1.0
     vars_lr['main/B4_2/conv1/kernel'] = 1.0
     vars_lr['main/B4_2/conv2/kernel'] = 1.0
-    vars_lr['main/feat_reduce/kernel'] = 1.0
-    vars_lr['main/feat_reduce/bias'] = 2.0
 
-    # TODO
-    vars_lr['segmentation/seg_lstm2d/...'] = 1.0
-    vars_lr['segmentation/lstm2d_decode/kernel'] = 1.0
-    vars_lr['segmentation/B1_side_path/kernel'] = 1.0
-    vars_lr['segmentation/B1_side_path/bias'] = 2.0
-    vars_lr['segmentation/B2_side_path/kernel'] = 1.0
-    vars_lr['segmentation/B2_side_path/bias'] = 2.0
-    vars_lr['segmentation/B3_side_path/kernel'] = 1.0
-    vars_lr['segmentation/B3_side_path/bias'] = 2.0
-    vars_lr['segmentation/B4_side_path/kernel'] = 1.0
-    vars_lr['segmentation/B4_side_path/bias'] = 2.0
-    vars_lr['segmentation/lstm_decoded/kernel'] = 1.0
-    vars_lr['segmentation/lstm_decoded/bias'] = 2.0
-    vars_lr['segmentation/fuse/kernel'] = 0.01
-    vars_lr['segmentation/fuse/bias'] = 0.02
+    vars_lr['main/feat_reduce/conv/kernel'] = 1.0
+    vars_lr['main/feat_reduce/bias/bias'] = 2.0
 
-    vars_lr['attention/fuse/kernel'] = 1.0
-    vars_lr['attention/fuse/bias'] = 2.0
-    vars_lr['attention/reduce/kernel'] = 1.0
-    vars_lr['attention/reduce/bias'] = 1.0
-    # TODO
-    vars_lr['attention/att_lstm/...'] = 1.0
-    vars_lr['attention/lstm2d_decode/kernel'] = 1.0
-    vars_lr['attention/up/kernel'] = 1.0
-    vars_lr['attention/up/bias'] = 1.0
+    vars_lr['main/B1_side_path/kernel'] = 1.0
+    vars_lr['main/B1_side_path/bias'] = 2.0
+    vars_lr['main/B2_side_path/kernel'] = 1.0
+    vars_lr['main/B2_side_path/bias'] = 2.0
+    vars_lr['main/B3_side_path/kernel'] = 1.0
+    vars_lr['main/B3_side_path/bias'] = 2.0
+    vars_lr['main/B4_side_path/kernel'] = 1.0
+    vars_lr['main/B4_side_path/bias'] = 2.0
+    vars_lr['main/resize_side_path/kernel'] = 1.0
+    vars_lr['main/resize_side_path/bias'] = 2.0
+
+    vars_lr['main/fuse/kernel'] = 0.01
+    vars_lr['main/fuse/bias'] = 0.02
 
     return vars_lr
 
