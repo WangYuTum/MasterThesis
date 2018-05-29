@@ -34,7 +34,7 @@ class ResNet():
         if self._data_format is not "NCHW" and self._data_format is not "NHWC":
             sys.exit("Invalid data format. Must be either 'NCHW' or 'NHWC'.")
 
-    def _build_model(self, images, atts, att_oracle):
+    def _build_model(self, images, atts, att_oracle, feed_state, train=True):
         '''
         :param images: [4,H,W,3], tf.float32, f0, f1, f2, f3
         :param atts: [2,H,W,1], tf.int32, f0, f2
@@ -48,8 +48,7 @@ class ResNet():
         im_size = tf.shape(images)
 
         ## attention gating on raw images
-        images = self._att_gate(images, atts, att_oracle)
-
+        images = self._att_gate(images, atts, att_oracle, train)
 
         ## The following 'main' scope is the primary (shared) feature layers, downsampling 16x
         shape_dict = {}
@@ -134,16 +133,29 @@ class ResNet():
             else:
                 model['feat_resized'] = tf.image.resize_images(model['feat_reduced'], [30, 56])
 
-            f_0 = model['feat_resized'][0:1,:,:,:] # [1,30,56,128] or [1,128,30,56]
-            f_1 = model['feat_resized'][1:2,:,:,:] # [1,30,56,128] or [1,128,30,56]
-            f_2 = model['feat_resized'][2:3,:,:,:]
-            f_3 = model['feat_resized'][3:4,:,:,:]
+            # f_0 = model['feat_resized'][0:1,:,:,:] # [1,30,56,128] or [1,128,30,56]
+            # f_1 = model['feat_resized'][1:2,:,:,:] # [1,30,56,128] or [1,128,30,56]
+            # f_2 = model['feat_resized'][2:3,:,:,:]
+            # f_3 = model['feat_resized'][3:4,:,:,:]
+            feat_seg_branch = []
+            feat_att_branch = []
+            for i in range(int(self._batch)):
+                if i % 2 == 0:
+                    feat_seg_branch.append(model['feat_resized'][i:i+1,:,:,:])
+                else:
+                    feat_att_branch.append(model['feat_resized'][i:i+1,:,:,:])
 
         with tf.variable_scope('segmentation'):
             # go to conv2dLSTM
-            f_0_2 = tf.concat([f_0, f_2], axis=0)
+            # f_0_2 = tf.concat([f_0, f_2], axis=0)
+            feat_seg = tf.concat(feat_seg_branch, axis=0)
             with tf.variable_scope('seg_lstm2d'):
-                out_lstm2d_seg = nn.lstm_conv2d(self._data_format, f_0_2) # [2,30,56,128] or [2,128,30,56]
+                if train:
+                    out_lstm2d_seg = nn.lstm_conv2d_train(self._data_format, feat_seg)  # [2,30,56,128] or [2,128,30,56]
+                else:
+                    out_lstm2d_seg, current_state, assign_state_ops = nn.lstm_conv2d_inf(self._data_format,
+                                                                       feat_seg,
+                                                                       feed_state=feed_state) # [2,30,56,128] or [2,128,30,56]
             shape_dict['lstm2d_decode'] = [1,1,128,128]
             with tf.variable_scope('lstm2d_decode'):
                 model['lstm2d_decode'] = nn.conv_layer(self._data_format, out_lstm2d_seg, 1,
@@ -200,13 +212,22 @@ class ResNet():
         with tf.variable_scope('attention'):
             # fuse visual features from f0 and f1
             if self._data_format == "NCHW":
-                dual_feat0 = tf.concat([model['lstm2d_decode'][0:1,:,:,:], f_1], axis=1) # [1,256,30,56]
-                dual_feat1 = tf.concat([model['lstm2d_decode'][1:2,:,:,:], f_3], axis=1)  # [1,256,30,56]
+                concat_axis = 1
             else:
-                dual_feat0 = tf.concat([model['lstm2d_decode'][0:1,:,:,:], f_1], axis=3)  # [1,256,30,56]
-                dual_feat1 = tf.concat([model['lstm2d_decode'][1:2,:,:,:], f_3], axis=3)  # [1,256,30,56]
+                concat_axis = 3
+            dual_feat_list = []
+            for i in range(int(self._batch / 2)):
+                dual_feat = tf.concat([model['lstm2d_decode'][i:i+1,:,:,:], feat_att_branch[i]], axis=concat_axis)
+                dual_feat_list.append(dual_feat)
+            dual_feats = tf.concat(dual_feat_list, axis=0) # [2,256,56,30] or [2,30,56,256]
+            # if self._data_format == "NCHW":
+            #     # dual_feat0 = tf.concat([model['lstm2d_decode'][0:1,:,:,:], f_1], axis=1) # [1,256,30,56]
+            #     # dual_feat1 = tf.concat([model['lstm2d_decode'][1:2,:,:,:], f_3], axis=1)  # [1,256,30,56]
+            # else:
+            #     dual_feat0 = tf.concat([model['lstm2d_decode'][0:1,:,:,:], f_1], axis=3)  # [1,256,30,56]
+            #     dual_feat1 = tf.concat([model['lstm2d_decode'][1:2,:,:,:], f_3], axis=3)  # [1,256,30,56]
             # fuse dual feat and reduce
-            dual_feats = tf.concat([dual_feat0, dual_feat1], axis=0) # [2,256,56,30] or [2,30,56,256]
+            # dual_feats = tf.concat([dual_feat0, dual_feat1], axis=0) # [2,256,56,30] or [2,30,56,256]
             with tf.variable_scope('fuse'):
                 dual_feats = nn.conv_layer(self._data_format, dual_feats, 1, 'SAME', [1,1,256,256])
                 dual_feats = nn.bias_layer(self._data_format, dual_feats, 256)
@@ -216,7 +237,13 @@ class ResNet():
                 dual_feats = nn.bias_layer(self._data_format, dual_feats, 128)
                 dual_feats = nn.ReLu_layer(dual_feats)
             with tf.variable_scope('att_lstm'):
-                out_lstm2d_att = nn.lstm_conv2d(self._data_format, dual_feats) # [2,56,30,128] or [2,128,56,30]
+                if train:
+                    out_lstm2d_att = nn.lstm_conv2d_train(self._data_format,
+                                                          dual_feats) # [2,56,30,128] or [2,128,56,30]
+                else:
+                    out_lstm2d_att, current_state, assign_state_ops = nn.lstm_conv2d_inf(self._data_format,
+                                                        dual_feats,
+                                                        feed_state=feed_state)  # [2,56,30,128] or [2,128,56,30]
             with tf.variable_scope('lstm2d_decode'):
                 att_lstm_decode = nn.conv_layer(self._data_format, out_lstm2d_att, 1,
                                                 'SAME', [1,1,128,128])
@@ -227,9 +254,9 @@ class ResNet():
                 # att_out = nn.conv_transpose(self._data_format, att_out, [2, 2], 16, 'SAME')
                 # att_out = nn.crop_features(self._data_format, att_out, im_size)
 
-        return att_out, seg_out
+        return att_out, seg_out, current_state, assign_state_ops
 
-    def _att_gate(self, images, atts, att_oracle):
+    def _att_gate(self, images, atts, att_oracle, train):
         '''
         :param images: [4,H,W,3] or [4,3,H,W], tf.float32
         :param atts: [2,H,W,1], tf.int32
@@ -237,21 +264,59 @@ class ResNet():
         :return: stacked gated f0, f1, f2, f3: [4,H,W,3] or [4,3,H,W]
         '''
 
-        if self._data_format == 'NCHW':
-            atts = tf.transpose(atts, [0, 3, 1, 2])
-            att_oracle = tf.transpose(att_oracle, [0, 3, 1, 2])
-        att0_mask = tf.cast(atts[0:1,:,:,:], tf.float32)
-        att2_mask = tf.cast(atts[1:2,:,:,:], tf.float32)
-        att_oracle_mask1 = tf.cast(att_oracle[0:1,:,:,:], tf.float32)
-        att_oracle_mask3 = tf.cast(att_oracle[1:2,:,:,:], tf.float32)
-        # Gate
-        gated_f0 = tf.multiply(images[0:1,:,:,:], att0_mask)
-        gated_f1 = tf.multiply(images[1:2,:,:,:], att_oracle_mask1)
-        gated_f2 = tf.multiply(images[2:3,:,:,:], att2_mask)
-        gated_f3 = tf.multiply(images[3:4,:,:,:], att_oracle_mask3)
-        stacked = tf.concat([gated_f0, gated_f1, gated_f2, gated_f3], axis=0)
+        if train:
+            if self._batch < 4:
+                sys.exit('Batch size must >=4 in train mode')
+            else:
+                if self._data_format == 'NCHW':
+                    atts = tf.transpose(atts, [0, 3, 1, 2])
+                    att_oracle = tf.transpose(att_oracle, [0, 3, 1, 2])
+                att_masks = []
+                att_oracle_masks = []
+                gated_imgs = []
+                for i in range(int(self._batch / 2)):
+                    att_masks.append(tf.cast(atts[i:i+1,:,:,:], tf.float32))
+                    att_oracle_masks.append(tf.cast(att_oracle[i:i+1,:,:,:], tf.float32))
+                # Gate
+                idx_att_mask = 0
+                idx_oracle_mask = 0
+                for i in range(int(self._batch)):
+                    if i % 2 == 0:
+                        gated_imgs.append(tf.multiply(images[i:i+1,:,:,:], att_masks[idx_att_mask]))
+                        idx_att_mask += 1
+                    else:
+                        gated_imgs.append(tf.multiply(images[i:i+1,:,:,:], att_oracle_masks[idx_oracle_mask]))
+                        idx_oracle_mask += 1
+                stacked = tf.concat(gated_imgs, axis=0)
+        else:
+            # consider one image at a time
+            if self._data_format == 'NCHW':
+                atts = tf.transpose(atts, [0, 3, 1, 2])
+                att_oracle = tf.transpose(att_oracle, [0, 3, 1, 2])
+            att0_mask = tf.cast(atts[0:1, :, :, :], tf.float32)
+            att_oracle_mask1 = tf.cast(att_oracle[0:1, :, :, :], tf.float32)
+            # Gate
+            gated_f0 = tf.multiply(images[0:1, :, :, :], att0_mask)
+            gated_f1 = tf.multiply(images[1:2, :, :, :], att_oracle_mask1)
+            stacked = tf.concat([gated_f0, gated_f1], axis=0)
 
         return stacked
+
+        # if self._data_format == 'NCHW':
+        #     atts = tf.transpose(atts, [0, 3, 1, 2])
+        #     att_oracle = tf.transpose(att_oracle, [0, 3, 1, 2])
+        # att0_mask = tf.cast(atts[0:1,:,:,:], tf.float32)
+        # att2_mask = tf.cast(atts[1:2,:,:,:], tf.float32)
+        # att_oracle_mask1 = tf.cast(att_oracle[0:1,:,:,:], tf.float32)
+        # att_oracle_mask3 = tf.cast(att_oracle[1:2,:,:,:], tf.float32)
+        # # Gate
+        # gated_f0 = tf.multiply(images[0:1,:,:,:], att0_mask)
+        # gated_f1 = tf.multiply(images[1:2,:,:,:], att_oracle_mask1)
+        # gated_f2 = tf.multiply(images[2:3,:,:,:], att2_mask)
+        # gated_f3 = tf.multiply(images[3:4,:,:,:], att_oracle_mask3)
+        # stacked = tf.concat([gated_f0, gated_f1, gated_f2, gated_f3], axis=0)
+        #
+        # return stacked
 
     def _att_loss(self, att_out, att_gt, att_weight):
         '''
@@ -342,7 +407,7 @@ class ResNet():
         '''
 
         att_02 = tf.concat([feed_att[0:1,:,:,:], feed_att[2:3,:,:,:]], axis=0) # [2,h,w,1]
-        att_out, seg_out = self._build_model(feed_img, att_02, feed_att_oracle)
+        att_out, seg_out, _ = self._build_model(feed_img, att_02, feed_att_oracle, feed_state=None, train=True)
         # att_out, seg_out both shape: [2,H,W,2] or [2,2,H,W] with original input image size
         att_13 = tf.concat([feed_att[1:2,:,:,:], feed_att[3:4,:,:,:]], axis=0) # [2,h,w,1]
         weight_13 = tf.concat([feed_weight[1:2,:,:,:], feed_weight[3:4,:,:,:]], axis=0) # [2,h,w,1]
@@ -373,18 +438,27 @@ class ResNet():
 
         return total_loss, train_step_op
 
-    def test(self, images):
+    def test(self, images, atts, att_oracle, feed_state):
         '''
-        :param images: batchs/single image have shape [batch, H, W, 3]
-        :return: probability map, binary mask
+        :param images: batchs/single image have shape [batch, H, W, 3], batch=2
+        :param atts: attention mask on current images [batch, H, W, 1], batch=1
+        :param att_oracle: attention oracles on current images [batch, H, W, 1], batch=1
+        :param feed_state: tf.float32, [2, 30, 56, 128].
+        :return: segmentation/attention binary masks
         '''
-        net_out, sup_out = self._build_model(images, False) # [batch, 2, H, W] or [batch, H, W, 2]
+        att_out, seg_out, current_state, assign_state_ops = self._build_model(images, atts, att_oracle,
+                                                            feed_state=feed_state,
+                                                            train=False) # [batch, 2, H, W] or [batch, H, W, 2]
         if self._data_format == "NCHW":
-            net_out = tf.transpose(net_out, [0, 2, 3, 1])
-        prob_map = tf.nn.softmax(net_out) # [batch, H, W, 2]
-        pred_mask = tf.argmax(prob_map, axis=3, output_type=tf.int32)  # [batch, H, W]
+            att_out = tf.transpose(att_out, [0, 2, 3, 1])
+            seg_out = tf.transpose(seg_out, [0, 2, 3, 1])
+        prob_map_att = tf.nn.softmax(att_out) # [batch, H, W, 2]
+        prob_map_seg = tf.nn.softmax(seg_out) # [batch, H, W, 2]
+        pred_mask_att = tf.argmax(prob_map_att, axis=3, output_type=tf.int32)  # [batch, H, W]
+        pred_mask_seg = tf.argmax(prob_map_seg, axis=3, output_type=tf.int32)  # [batch, H, W]
 
-        return prob_map[:,:,:,1:], pred_mask
+        # returned state is a tuple, each with shape [1,30,56,128]
+        return pred_mask_att, pred_mask_seg, current_state, assign_state_ops
 
     def _balanced_cross_entropy(self, input_tensor, labels, weight):
         '''

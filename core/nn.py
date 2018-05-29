@@ -7,11 +7,12 @@ from __future__ import division
 from __future__ import print_function
 
 import tensorflow as tf
+from tensorflow.contrib.framework.python.framework import checkpoint_utils
 import numpy as np
 import sys
 
 
-def lstm_conv2d(data_format, input_tensor):
+def lstm_conv2d_train(data_format, input_tensor):
     '''
     :param data_format: 'NCHW' or 'NHWC'
     :param input_tensor: [2,128,30,56] or [2,30,56,128], first dim indicates max_time
@@ -51,6 +52,52 @@ def lstm_conv2d(data_format, input_tensor):
         lstm_out = tf.transpose(lstm_out, [0,3,1,2])
 
     return lstm_out
+
+
+def lstm_conv2d_inf(data_format, input_tensor, feed_state):
+    '''
+    :param data_format: 'NCHW' or 'NHWC'
+    :param input_tensor: [1,128,30,56] or [1,30,56,128], first dim indicates max_time
+    :param feed_state: [2, 30, 56, 128], Must be converted to a tuple ([1,30,56,128], [1,30,56,128])
+    :return: lstm_out: [1,128,30,56] or [1,30,56,128], lstm_state: lstm_state_tuple, assign_state_ops
+    '''
+    scope_name = tf.get_variable_scope().name
+    print('Layer name: %s'%scope_name)
+    if data_format == "NCHW":
+        input_tensor = tf.transpose(input_tensor, [0,2,3,1]) # To NHWC
+    if tf.contrib.framework.get_name_scope().find('attention') != -1:
+        ker_shape = [3, 3] # large kernel shape for attention branch
+    else:
+        ker_shape = [1, 1]  # small kernel shape for seg branch
+    input_tensor = tf.expand_dims(input_tensor, 0)  # [1,2,30,56,128], [batch, time_max, h, w, 128]
+    lstm_cell = tf.contrib.rnn.Conv2DLSTMCell(input_shape=[30, 56, 128],
+                                              output_channels=128,
+                                              kernel_shape=ker_shape,
+                                              use_bias=True,  # default
+                                              skip_connection=False,  # default
+                                              forget_bias=1.0,  # default
+                                              initializers=None,  # default
+                                              name='conv2dlstm')
+    # zero_state = lstm_cell.zero_state(batch_size=1, dtype=tf.float32)
+    c_var = tf.Variable(tf.zeros([1,30,56,128]), trainable=False, dtype=tf.float32, name='LSTM2d_c')
+    h_var = tf.Variable(tf.zeros([1,30,56,128]), trainable=False, dtype=tf.float32, name='LSTM2d_h')
+    new_tuple = tf.contrib.rnn.LSTMStateTuple(c_var, h_var)
+    assign_c_op = tf.assign(c_var, feed_state[0:1,:,:,:])
+    assign_h_op = tf.assign(h_var, feed_state[1:2,:,:,:])
+    assign_state_ops = [assign_c_op, assign_h_op]
+    lstm_out, final_state = tf.nn.dynamic_rnn(cell=lstm_cell,
+                                              inputs=input_tensor,
+                                              sequence_length=[1],
+                                              initial_state=new_tuple,
+                                              dtype=tf.float32,
+                                              swap_memory=True)
+    # lstm_out has shape: [1,1,30,56,128], final_state: ([1,30,56,128], [1,30,56,128])
+    lstm_out = tf.squeeze(lstm_out, 0)  # to [1,30,56,128]
+    # change back to required data_format
+    if data_format == "NCHW":
+        lstm_out = tf.transpose(lstm_out, [0,3,1,2])
+
+    return lstm_out, final_state, assign_state_ops
 
 
 def conv_layer(data_format, input_tensor, stride=1, padding='SAME', shape=None):
@@ -289,6 +336,28 @@ def get_imgnet_var():
             imgnet_dict['main/B3_' + str(i + 3) + '/conv2/kernel'] = tf.get_variable('kernel')
 
     return imgnet_dict
+
+def get_two_stream_var(ckpt_path):
+
+    var_dict = {}
+    names_shapes = checkpoint_utils.list_variables(ckpt_path)
+    for i in range(len(names_shapes)):
+        if names_shapes[i][0].find('Adam') == -1 and \
+                names_shapes[i][0].find('beta') == -1 and \
+                names_shapes[i][0].find('global_step') == -1:
+            # TODO
+            name_scope_list = names_shapes[i][0].split('/')
+            name_scope = ''
+            for j in range(len(name_scope_list)-1):
+                if j != len(name_scope_list)-2:
+                    name_scope = name_scope + name_scope_list[j] + '/'
+                else:
+                    name_scope = name_scope + name_scope_list[j]
+            var_name = names_shapes[i][0].split('/')[-1]
+            with tf.variable_scope(name_scope, reuse=True):
+                var_dict[names_shapes[i][0]] = tf.get_variable(var_name)
+
+    return var_dict
 
 
 def param_lr():

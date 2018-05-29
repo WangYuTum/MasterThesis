@@ -22,7 +22,6 @@ from dataset import random_resize_flip
 from dataset import pack_reshape_batch
 from dataset import get_balance_weights
 from core import resnet
-from core.nn import set_conv_transpose_filters
 from core.nn import get_imgnet_var
 
 # config device
