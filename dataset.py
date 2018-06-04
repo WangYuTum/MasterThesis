@@ -238,7 +238,8 @@ class DAVIS_dataset():
             sys.exit("Got no frames for seq {}".format(self._seq_path))
         for i in range(num_frames):
             frame = np.array(Image.open(files_seq[i])).astype(np.float32)
-            # stardardize
+            # standardize
+            frame = frame.astype(np.float32) * 1.0 / 255.0
             frame -= data_mean
             frame /= data_std
             seq_frames.append(frame)

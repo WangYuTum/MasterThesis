@@ -18,12 +18,12 @@ arg_fine_tune_seq = int(sys.argv[2])
 # set fine-tune or test
 FINE_TUNE = arg_fine_tune
 FINE_TUNE_seq = arg_fine_tune_seq # max 30
-SUP = 0
 
 # config device
 os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 config_gpu = tf.ConfigProto()
-config_gpu.gpu_options.per_process_gpu_memory_fraction = 0.6
+config_gpu.gpu_options.allow_growth = True
+#config_gpu.gpu_options.per_process_gpu_memory_fraction = 0.6
 
 # get all val seq paths
 val_seq_txt = '../../../DAVIS17_train_val/ImageSets/2017/val.txt'
@@ -63,24 +63,25 @@ if FINE_TUNE == 1:
     params_model = {
         'batch': 1,
         'l2_weight': 0.0002,
-        'init_lr': 1e-4, # original paper: 1e-8, can be further tuned
-        'data_format': 'NHWC', # optimal for cudnn
+        'init_lr': 1e-7, # original paper: 1e-8, can be further tuned
+        'data_format': 'NCHW', # optimal for cudnn
         'save_path': '../data/ckpts/fine-tune/attention_bin/CNN-part-full-img/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt',
         'tsboard_logs': '../data/tsboard_logs/fine-tune/attention_bin/CNN-part-full-img/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1],
-        'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-full-img/att_bin.ckpt-90000'
+        'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-full-img/att_bin.ckpt-60000'
     }
     global_iters = 1000 # original paper: 500
     save_ckpt_interval = 500
     summary_write_interval = 10
     print_screen_interval = 10
+    acc_count = 1
     global_step = tf.Variable(0, name='global_step',
                               trainable=False)  # incremented automatically by 1 after each apply_gradients
 else:
     params_model = {
         'batch': 1,
-        'data_format': 'NHWC',  # optimal for cudnn
+        'data_format': 'NCHW',  # optimal for cudnn
         #'restore_fine-tune_bin': '../data/ckpts/attention_bin/CNN-part-full-img/att_bin.ckpt-90000',
-        'restore_fine-tune_bin': '../data/ckpts/fine-tune/attention_bin/CNN-part-full-img/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt-91000',
+        'restore_fine-tune_bin': '../data/ckpts/fine-tune/attention_bin/CNN-part-full-img/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt-60500',
         'save_result_path': '../data/results/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]
     }
 
@@ -93,7 +94,7 @@ if FINE_TUNE == 1:
 # build network, on GPU by default
 model = resnet.ResNet(params_model)
 if FINE_TUNE == 1:
-    loss, step= model.train(feed_img, feed_one_shot_gt, feed_one_shot_weight, global_step)
+    loss, bp_step, grad_acc_op = model.train(feed_img, feed_one_shot_gt, feed_one_shot_weight, global_step, acc_count)
     init_op = tf.global_variables_initializer()
     sum_all = tf.summary.merge_all()
     # define Saver
@@ -107,9 +108,6 @@ else:
 
 # run session
 with tf.Session(config=config_gpu) as sess:
-    # DEBUG
-    # sess = tf_debug.LocalCLIDebugWrapperSession(sess)
-    # sess.add_tensor_filter("has_inf_or_nan", tf_debug.has_inf_or_nan)
 
     if FINE_TUNE == 1:
         sum_writer = tf.summary.FileWriter(params_model['tsboard_logs'], sess.graph)
@@ -134,10 +132,12 @@ with tf.Session(config=config_gpu) as sess:
             feed_one_shot_weight: train_gt_weight[2][np.newaxis,:]
         }
         for iter_step in range(global_iters):
-            # execute BP
-            run_result = sess.run([loss, sum_all, step], feed_dict=feed_dict_v)
+            # compute loss and acc grad
+            run_result = sess.run([loss, sum_all] + grad_acc_op, feed_dict=feed_dict_v)
             loss_ = run_result[0]
             sum_all_ = run_result[1]
+            # execute BP
+            _ = sess.run(bp_step)
 
             if global_step.eval() % summary_write_interval == 0:
                 sum_writer.add_summary(sum_all_, global_step.eval())
