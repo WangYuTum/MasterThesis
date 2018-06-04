@@ -33,7 +33,7 @@ class ResNet():
         if self._data_format is not "NCHW" and self._data_format is not "NHWC":
             sys.exit("Invalid data format. Must be either 'NCHW' or 'NHWC'.")
 
-    def _build_model(self, images):
+    def _build_model(self, images, is_train=False):
         '''
         :param images: [1,H,W,3], tf.float32
         :return: segmentation output before softmax
@@ -61,11 +61,11 @@ class ResNet():
             shape_dict['B1']['side'] = [1, 1, 64, 128]
             shape_dict['B1']['convs'] = [[3, 3, 64, 128], [3, 3, 128, 128]]
             with tf.variable_scope('B1_0'):
-                model['B1_0'] = nn.res_side(self._data_format, model['B0_pooled'], shape_dict['B1'])
+                model['B1_0'] = nn.res_side(self._data_format, model['B0_pooled'], shape_dict['B1'], is_train)
             for i in range(2):
                 with tf.variable_scope('B1_' + str(i + 1)):
                     model['B1_' + str(i + 1)] = nn.res(self._data_format, model['B1_' + str(i)],
-                                                   shape_dict['B1']['convs'])
+                                                   shape_dict['B1']['convs'], is_train)
 
             # Pooling 2
             model['B1_2_pooled'] = nn.max_pool2d(self._data_format, model['B1_2'], 2, 'SAME')
@@ -75,11 +75,11 @@ class ResNet():
             shape_dict['B2']['side'] = [1, 1, 128, 256]
             shape_dict['B2']['convs'] = [[3, 3, 128, 256], [3, 3, 256, 256]]
             with tf.variable_scope('B2_0'):
-                model['B2_0'] = nn.res_side(self._data_format, model['B1_2_pooled'], shape_dict['B2'])
+                model['B2_0'] = nn.res_side(self._data_format, model['B1_2_pooled'], shape_dict['B2'], is_train)
             for i in range(2):
                 with tf.variable_scope('B2_' + str(i + 1)):
                     model['B2_' + str(i + 1)] = nn.res(self._data_format, model['B2_' + str(i)],
-                                                       shape_dict['B2']['convs'])
+                                                       shape_dict['B2']['convs'], is_train)
 
             # Pooling 3
             model['B2_2_pooled'] = nn.max_pool2d(self._data_format, model['B2_2'], 2, 'SAME')
@@ -89,11 +89,11 @@ class ResNet():
             shape_dict['B3']['side'] = [1, 1, 256, 512]
             shape_dict['B3']['convs'] = [[3, 3, 256, 512], [3, 3, 512, 512]]
             with tf.variable_scope('B3_0'):
-                model['B3_0'] = nn.res_side(self._data_format, model['B2_2_pooled'], shape_dict['B3'])
+                model['B3_0'] = nn.res_side(self._data_format, model['B2_2_pooled'], shape_dict['B3'], is_train)
             for i in range(5):
                 with tf.variable_scope('B3_' + str(i + 1)):
                     model['B3_' + str(i + 1)] = nn.res(self._data_format, model['B3_' + str(i)],
-                                                       shape_dict['B3']['convs'])
+                                                       shape_dict['B3']['convs'], is_train)
 
             # Pooling 4
             model['B3_5_pooled'] = nn.max_pool2d(self._data_format, model['B3_5'], 2, 'SAME')
@@ -103,12 +103,12 @@ class ResNet():
             shape_dict['B4_0']['side'] = [1, 1, 512, 1024]
             shape_dict['B4_0']['convs'] = [[3, 3, 512, 512],[3, 3, 512, 1024]]
             with tf.variable_scope('B4_0'):
-                model['B4_0'] = nn.res_side(self._data_format, model['B3_5_pooled'], shape_dict['B4_0'])
+                model['B4_0'] = nn.res_side(self._data_format, model['B3_5_pooled'], shape_dict['B4_0'], is_train)
             shape_dict['B4_23'] = [[3, 3, 1024, 512], [3, 3, 512, 1024]]
             for i in range(2):
                 with tf.variable_scope('B4_' + str(i + 1)):
                     model['B4_' + str(i + 1)] = nn.res(self._data_format, model['B4_' + str(i)],
-                                                       shape_dict['B4_23'])
+                                                       shape_dict['B4_23'], is_train)
 
             shape_dict['feat_reduce'] = [1,1,1024,128]
             with tf.variable_scope('feat_reduce'):
@@ -200,17 +200,16 @@ class ResNet():
 
         return loss
 
-    def train(self, feed_img, feed_seg, feed_weight, global_step, acc_count):
+    def train(self, feed_img, feed_seg, feed_weight, global_step):
         '''
-        :param feed_img: [1,H,W,3], tf.float32
-        :param feed_seg: [1,H,W,1], tf.int32
-        :param feed_weight: [1,H,W,1], tf.float32
+        :param feed_img: [b,H,W,3], tf.float32
+        :param feed_seg: [b,H,W,1], tf.int32
+        :param feed_weight: [b,H,W,1], tf.float32
         :param global_step: keep track of global train step
-        :param acc_count: number of accumulated gradients
-        :return: total_loss, train_step_op, grad_acc_op
+        :return: total_loss, train_step_op
         '''
 
-        seg_out = self._build_model(feed_img) # seg_out shape: [1,H,W,2] or [1,2,H,W] with original input image size
+        seg_out = self._build_model(feed_img, is_train=True) # seg_out shape: [b,H,W,2] or [b,2,H,W] with original input image size
         total_loss = self._seg_loss(seg_out, feed_seg, feed_weight) \
                      + self._l2_loss()
         tf.summary.scalar('total_loss', total_loss)
@@ -222,40 +221,12 @@ class ResNet():
             seg_pred = seg_out
         tf.summary.image('pred', tf.cast(tf.nn.softmax(seg_pred)[:, :, :, 1:2], tf.float16))
 
-        bp_step, grad_acc_op = self._optimize(total_loss, acc_count, global_step)
+        update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+        with tf.control_dependencies(update_ops):
+            bp_step = tf.train.AdamOptimizer(self._init_lr).minimize(total_loss, global_step=global_step)
+        print("Model built.")
 
-        return total_loss, bp_step, grad_acc_op
-
-    def _optimize(self, loss, acc_count, global_step):
-        '''
-        :param loss: the network loss
-        :return: a train op, a grad_acc_op
-        '''
-
-        optimizer = tf.train.AdamOptimizer(self._init_lr)
-        grads_vars = optimizer.compute_gradients(loss)
-
-        # create grad accumulator for each variable-grad pair
-        grad_accumulator = {}
-        for idx in range(len(grads_vars)):
-            if grads_vars[idx][0] is not None:
-                grad_accumulator[idx] = tf.ConditionalAccumulator(grads_vars[idx][0].dtype)
-        # apply gradient to each grad accumulator
-        layer_lr = nn.param_lr()
-        grad_accumulator_op = []
-        for var_idx, grad_acc in grad_accumulator.iteritems():
-            var_name = str(grads_vars[var_idx][1].name).split(':')[0]
-            var_grad = grads_vars[var_idx][0]
-            grad_accumulator_op.append(grad_acc.apply_grad(var_grad * layer_lr[var_name], local_step=global_step))
-        # take average gradients for each variable after accumulating count reaches
-        mean_grads_vars = []
-        for var_idx, grad_acc in grad_accumulator.iteritems():
-            mean_grads_vars.append((grad_acc.take_grad(acc_count), grads_vars[var_idx][1]))
-
-        # apply average gradients to variables
-        update_op = optimizer.apply_gradients(mean_grads_vars, global_step=global_step)
-
-        return update_op, grad_accumulator_op
+        return total_loss, bp_step
 
     def _balanced_cross_entropy(self, input_tensor, labels, weight):
         '''
@@ -292,7 +263,7 @@ class ResNet():
         :param images: batchs/single image have shape [batch, H, W, 3]
         :return: probability map, binary mask
         '''
-        net_out = self._build_model(images) # [batch, 2, H, W] or [batch, H, W, 2]
+        net_out = self._build_model(images, is_train=False) # [batch, 2, H, W] or [batch, H, W, 2]
         if self._data_format == "NCHW":
             net_out = tf.transpose(net_out, [0, 2, 3, 1])
         prob_map = tf.nn.softmax(net_out) # [batch, H, W, 2]

@@ -14,19 +14,14 @@ import numpy as np
 import tensorflow as tf
 sys.path.append("..")
 from dataset import DAVIS_dataset
-from dataset import get_flip_bool
-from dataset import get_scale
-from dataset import standardize
-from dataset import random_resize_flip
-from dataset import pack_reshape_batch
-from dataset import get_balance_weights
 from core import resnet
 from core.nn import get_imgnet_var
 
 # config device
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 config_gpu = tf.ConfigProto()
-config_gpu.gpu_options.per_process_gpu_memory_fraction = 0.95
+config_gpu.gpu_options.allow_growth = True
+#config_gpu.gpu_options.per_process_gpu_memory_fraction = 0.95
 
 # config dataset params
 params_data = {
@@ -38,7 +33,7 @@ with tf.device('/cpu:0'):
 
 # config train params
 params_model = {
-    'batch': 1, # feed a random image at a time
+    'batch': 2, # feed batch of random images at a time
     'l2_weight': 0.0002,
     'init_lr': 1e-5, # original paper: 1e-8,
     'data_format': 'NCHW', # optimal for cudnn
@@ -50,13 +45,11 @@ params_model = {
 # define epochs
 epochs = 100
 frames_per_seq = 100 # each seq is extended to 100 frames by padding previous frames inversely
-steps_per_seq = 10 # because accumulate gradients 10 times before BP
 num_seq = 60
-steps_per_ep = num_seq * steps_per_seq
-acc_count = 10 # accumulate 10 gradients
-total_steps = epochs * steps_per_ep # total steps of BP, 60000
+steps_per_ep = int(num_seq * frames_per_seq / params_model['batch']) # 3000 for batch of 2
+total_steps = epochs * steps_per_ep # total steps of BP, 150000
 global_step = tf.Variable(0, name='global_step', trainable=False) # incremented automatically by 1 after 1 BP
-save_ckpt_interval = 1200 # corresponds to 20 epoch
+save_ckpt_interval = steps_per_ep * 20 # corresponds to 20 epoch
 summary_write_interval = 50 # 50
 print_screen_interval = 20 # 20
 
@@ -73,13 +66,13 @@ sum_w = tf.summary.image('weight', feed_weight)
 
 # build network, on GPU by default
 model = resnet.ResNet(params_model)
-loss, bp_step, grad_acc_op = model.train(feed_img, feed_seg, feed_weight, global_step, acc_count)
+loss, bp_step= model.train(feed_img, feed_seg, feed_weight, global_step)
 init_op = tf.global_variables_initializer()
 sum_all = tf.summary.merge_all()
 
 # define saver
 saver_img = tf.train.Saver(var_list=get_imgnet_var())
-saver_parent = tf.train.Saver()
+saver_parent = tf.train.Saver(max_to_keep=10)
 
 # run the session
 with tf.Session(config=config_gpu) as sess:
@@ -96,17 +89,12 @@ with tf.Session(config=config_gpu) as sess:
         print("Epoch {} ...".format(ep))
         # train steps for each epoch
         for local_step in range(steps_per_ep):
-            # accumulate gradients
-            for _ in range(acc_count):
-                # choose an image randomly (randomly flip/resize)
-                img, seg, weight = mydata.get_a_random_sample() # [1,h,w,3] float32, [1,h,w,1] int32, [1,h,w,1] float32
-                feed_dict_v = {feed_img: img, feed_seg: seg, feed_weight: weight}
-                # forward
-                run_result = sess.run([loss, sum_all]+grad_acc_op, feed_dict=feed_dict_v)
-                loss_ = run_result[0]
-                sum_all_ = run_result[1]
-            # BP, increment global_step by 1 automatically
-            sess.run(bp_step)
+            # get a batch of samples
+            img_batch, seg_batch, weight_batch = mydata.get_a_batch(params_model['batch']) # [b,h,w,3] float32, [b,h,w,1] int32, [b,h,w,1] float32
+            feed_dict_v = {feed_img: img_batch, feed_seg: seg_batch, feed_weight: weight_batch}
+            run_result = sess.run([loss, sum_all, bp_step], feed_dict=feed_dict_v)
+            loss_ = run_result[0]
+            sum_all_ = run_result[1]
             # save summary
             if global_step.eval() % summary_write_interval == 0 and global_step.eval() != 0:
                 sum_writer.add_summary(sum_all_, global_step.eval())

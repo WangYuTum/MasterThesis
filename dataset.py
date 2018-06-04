@@ -149,8 +149,33 @@ class DAVIS_dataset():
 
         return train_imgs, train_gts
 
-    def get_a_random_sample(self):
+    def get_a_batch(self, batch_size):
         '''
+        :param batch_size: >=2
+        :return: triple: (batch_imgs, batch_segs, batch_weights)
+        '''
+
+        if batch_size < 2:
+            sys.exit('Batch size must be at least 2.')
+        # get rescale ratio for this batch
+        scale = get_scale()
+        # get batch_size images/segs/weights
+        img = None
+        seg = None
+        weight = None
+        bat_imgs, bat_segs, bat_weights = self._get_a_random_sample(scale) # all shape [1,h,w,c]
+        for b_id in range(batch_size-1):
+            img, seg, weight = self._get_a_random_sample(scale) # all shape [1,h,w,c]
+            bat_imgs = np.concatenate((bat_imgs, img), axis=0) # [b,h,w,3]
+            bat_segs = np.concatenate((bat_segs, seg), axis=0) # [b,h,w,1]
+            bat_weights = np.concatenate((bat_weights, weight), axis=0) # [b,h,w,1]
+
+        return bat_imgs, bat_segs, bat_weights
+
+    def _get_a_random_sample(self, scale):
+        '''
+        :param flip_bool: flip or not
+        :param scale: scale ratio
         :return: img [1, h, w, 3] float32, seg [1, h, w, 1] int32, weight [1, h, w, 1] float32
         '''
 
@@ -164,18 +189,17 @@ class DAVIS_dataset():
         stacked = np.concatenate((img, seg[..., np.newaxis]), axis=-1) # [h, w, 4]
         if get_flip_bool():
             stacked = np.fliplr(stacked)
-        img_H = np.shape(img)[0]
-        img_W = np.shape(img)[1]
-        scale = get_scale()
+        img_H = 480
+        img_W = 854
         new_H = int(img_H * scale)
         new_W = int(img_W * scale)
 
         img_obj = Image.fromarray(stacked[:, :, 0:3], mode='RGB')
-        img_obj.resize((new_H, new_W), Image.BILINEAR)
+        img_obj = img_obj.resize((new_H, new_W), Image.BILINEAR)
         img = np.array(img_obj, img.dtype) # [h, w, 3], np.uint8
 
         seg_obj = Image.fromarray(np.squeeze(stacked[:, :, 3:4]), mode='L')
-        seg_obj.resize((new_H, new_W), Image.NEAREST)
+        seg_obj = seg_obj.resize((new_H, new_W), Image.NEAREST)
         seg = np.array(seg_obj, seg.dtype)[..., np.newaxis] # [h, w, 1], np.uint8
 
         # standardize
