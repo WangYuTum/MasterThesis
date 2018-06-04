@@ -8,11 +8,9 @@ from __future__ import division
 from __future__ import print_function
 
 import tensorflow as tf
-import numpy as np
 
 import nn
 import sys
-import os
 
 class ResNet():
     def __init__(self, params):
@@ -26,9 +24,6 @@ class ResNet():
         self._batch = params.get('batch', 1)
         self._l2_weight = params.get('l2_weight', 0.0002)
         self._init_lr = params.get('init_lr', 1e-5)
-        # self._base_decay = params.get('base_decay', 1.0)
-        # self._sup_decay = params.get('sup_decay', 0.1)
-        # self._fuse_decay = params.get('fuse_decay', 0.01)
 
         if self._data_format is not "NCHW" and self._data_format is not "NHWC":
             sys.exit("Invalid data format. Must be either 'NCHW' or 'NHWC'.")

@@ -10,49 +10,6 @@ import tensorflow as tf
 import numpy as np
 import sys
 
-
-def lstm_conv2d(data_format, input_tensor):
-    '''
-    :param data_format: 'NCHW' or 'NHWC'
-    :param input_tensor: [2,128,30,56] or [2,30,56,128], first dim indicates max_time
-    :return: out of lstm [2,128,30,56] or [2,30,56,128]
-    '''
-
-    scope_name = tf.get_variable_scope().name
-    print('Layer name: %s'%scope_name)
-
-    if data_format == "NCHW":
-        input_tensor = tf.transpose(input_tensor, [0,2,3,1]) # To NHWC
-    if tf.contrib.framework.get_name_scope().find('attention') != -1:
-        ker_shape = [3, 3] # large kernel shape for attention branch
-    else:
-        ker_shape = [1, 1] # small kernel shape for seg branch
-    input_tensor = tf.expand_dims(input_tensor, 0) # [1,2,30,56,128], [batch, time_max, h, w, 128]
-    lstm_cell = tf.contrib.rnn.Conv2DLSTMCell(input_shape=[30, 56, 128],
-                                              output_channels=128,
-                                              kernel_shape=ker_shape,
-                                              use_bias=True,    # default
-                                              skip_connection=False, # default
-                                              forget_bias=1.0,  # default
-                                              initializers=None,    # default
-                                              name='conv2dlstm')
-    zero_state = lstm_cell.zero_state(batch_size=1, dtype=tf.float32)
-    #input_tensor = tf.reshape(input_tensor, [1,2,30,56,128])
-    lstm_out, final_state = tf.nn.dynamic_rnn(cell=lstm_cell,
-                                              inputs=input_tensor,
-                                              sequence_length=[2],
-                                              initial_state=zero_state,
-                                              dtype=tf.float32,
-                                              swap_memory=True)
-    # lstm_out has shape: [1,2,30,56,128]
-    lstm_out = tf.squeeze(lstm_out, 0)  # to [2,30,56,128]
-    # change back to required data_format
-    if data_format == "NCHW":
-        lstm_out = tf.transpose(lstm_out, [0,3,1,2])
-
-    return lstm_out
-
-
 def conv_layer(data_format, input_tensor, stride=1, padding='SAME', shape=None):
     ''' The standard convolution layer '''
     scope_name = tf.get_variable_scope().name
@@ -157,94 +114,6 @@ def get_conv_transpose_ksize(factor):
     return 2 * factor - factor % 2
 
 
-def upsample_filt(size):
-    """
-    Make a 2D bilinear kernel suitable for upsampling of the given (h, w) kernel size.
-    """
-    factor = (size + 1) // 2
-    if size % 2 == 1:
-        center = factor - 1
-    else:
-        center = factor - 0.5
-    og = np.ogrid[:size, :size]
-
-    return (1 - abs(og[0] - center) / factor) * \
-           (1 - abs(og[1] - center) / factor)
-
-
-def set_conv_transpose_filters(variables):
-    # Input: all tf.Variables
-    set_filter_ops = []
-    for v in variables:
-        if '-up' in v.name:
-            h, w, k, m = v.get_shape()
-            tmp = np.zeros((m, k, h, w))
-            if m != k:
-                sys.exit("Transpose kernel input and output channels must be the same.")
-            if h != w:
-                sys.exit("Transpose kernel height and width must be the same. ")
-            up_filter = upsample_filt(int(h))
-            tmp[range(m), range(k), :, :] = up_filter
-            set_filter_ops.append(tf.assign(v, tmp.transpose(2, 3, 1, 0)))
-
-    return set_filter_ops
-
-
-def conv_transpose(data_format, input_tensor, filter_size, factor=0, padding='SAME'):
-    # Create a transposed conv layer according to upsampling factor.
-    # This function must be put into an appropriate variable scope.
-    # All transposed filters must be reset to bilinear after tf.train.Saver store the variables
-
-    # filter_size
-    in_channel = filter_size[0]
-    out_channel = filter_size[1]
-
-    batch_size = tf.shape(input_tensor)[0]
-    trans_ksize = get_conv_transpose_ksize(factor)
-    init_filter = tf.get_variable('bilinear-up',
-                                  shape=[trans_ksize, trans_ksize, out_channel, in_channel],
-                                  initializer = tf.zeros_initializer(),
-                                  trainable = False)
-    if data_format == "NCHW":
-        # out_channels = tf.shape(input_tensor)[1]
-        out_channels = out_channel
-        new_H = tf.shape(input_tensor)[2] * factor
-        new_W = tf.shape(input_tensor)[3] * factor
-        trans_output_shape = [batch_size, out_channels, new_H, new_W]
-        trans_stride = [1, 1, factor, factor]
-    else:
-        # out_channels = tf.shape(input_tensor)[3]
-        out_channels = out_channel
-        new_H = tf.shape(input_tensor)[1]
-        new_W = tf.shape(input_tensor)[2]
-        trans_output_shape = [batch_size, new_H, new_W, out_channels]
-        trans_stride = [1, factor, factor, 1]
-
-    trans_out = tf.nn.conv2d_transpose(input_tensor,
-                                       init_filter,
-                                       trans_output_shape,
-                                       trans_stride,
-                                       padding,
-                                       data_format)
-
-    return trans_out
-
-def crop_features(data_format, feature, out_size):
-    # Slice down the feature to out_size
-    # This is done after deconv since deconv output may exceed original image size
-
-    up_size = tf.shape(feature)
-    if data_format == "NCHW":
-        ini_h = tf.div(tf.subtract(up_size[2], out_size[2]), 2) # might be zero
-        ini_w = tf.div(tf.subtract(up_size[3], out_size[3]), 2) # might be zero
-        slice_input = tf.slice(feature, (0, 0, ini_h, ini_w), (-1, -1, out_size[2], out_size[3]))
-        return tf.reshape(slice_input, [up_size[0], up_size[1], out_size[2], out_size[3]])
-    else:
-        ini_h = tf.div(tf.subtract(up_size[1], out_size[1]), 2)  # might be zero
-        ini_w = tf.div(tf.subtract(up_size[2], out_size[2]), 2)  # might be zero
-        slice_input = tf.slice(feature, (0, ini_h, ini_w, 0), (-1, out_size[1], out_size[2], -1))
-        return tf.reshape(slice_input, [up_size[0], out_size[1], out_size[2], up_size[3]])
-
 def bias_layer(data_format, input_tensor, shape=None):
 
     scope_name = tf.get_variable_scope().name
@@ -254,6 +123,7 @@ def bias_layer(data_format, input_tensor, shape=None):
     bias_out = tf.nn.bias_add(input_tensor, bias, data_format)
 
     return bias_out
+
 
 def create_bias(shape=None):
 

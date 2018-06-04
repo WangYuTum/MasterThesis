@@ -10,23 +10,16 @@ from __future__ import division
 from __future__ import print_function
 
 import os,sys
-import numpy as np
 import tensorflow as tf
 sys.path.append("..")
 from dataset import DAVIS_dataset
-from dataset import get_flip_bool
-from dataset import get_scale
-from dataset import standardize
-from dataset import random_resize_flip
-from dataset import pack_reshape_batch
-from dataset import get_balance_weights
 from core import resnet
 from core.nn import get_imgnet_var
 
 # config device
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 config_gpu = tf.ConfigProto()
-config_gpu.gpu_options.per_process_gpu_memory_fraction = 0.95
+config_gpu.gpu_options.allow_growth = True
 
 # config dataset params
 params_data = {
@@ -42,8 +35,8 @@ params_model = {
     'l2_weight': 0.0002,
     'init_lr': 1e-5, # original paper: 1e-8,
     'data_format': 'NCHW', # optimal for cudnn
-    'save_path': '../data/ckpts/attention_bin/CNN-part-full-img/att_bin.ckpt',
-    'tsboard_logs': '../data/tsboard_logs/attention_bin/CNN-part-full-img/',
+    'save_path': '../data/ckpts/attention_bin/CNN-part-full-img/noBN/att_bin.ckpt',
+    'tsboard_logs': '../data/tsboard_logs/attention_bin/CNN-part-full-img/noBN',
     'restore_imgnet': '../data/ckpts/imgnet.ckpt', # restore model from where
     'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-full-img/att_bin.ckpt-xxx'
 }
@@ -56,9 +49,9 @@ steps_per_ep = num_seq * steps_per_seq
 acc_count = 10 # accumulate 10 gradients
 total_steps = epochs * steps_per_ep # total steps of BP, 60000
 global_step = tf.Variable(0, name='global_step', trainable=False) # incremented automatically by 1 after 1 BP
-save_ckpt_interval = 1200 # corresponds to 20 epoch
-summary_write_interval = 50 # 50
-print_screen_interval = 20 # 20
+save_ckpt_interval = 12000 # corresponds to 20 epoch
+summary_write_interval = 50
+print_screen_interval = 20
 
 # define placeholders
 feed_img = tf.placeholder(tf.float32, (params_model['batch'], None, None, 3))
@@ -79,7 +72,7 @@ sum_all = tf.summary.merge_all()
 
 # define saver
 saver_img = tf.train.Saver(var_list=get_imgnet_var())
-saver_parent = tf.train.Saver()
+saver_parent = tf.train.Saver(max_to_keep=10)
 
 # run the session
 with tf.Session(config=config_gpu) as sess:
