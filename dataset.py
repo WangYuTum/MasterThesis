@@ -195,11 +195,11 @@ class DAVIS_dataset():
         new_W = int(img_W * scale)
 
         img_obj = Image.fromarray(stacked[:, :, 0:3], mode='RGB')
-        img_obj = img_obj.resize((new_H, new_W), Image.BILINEAR)
+        img_obj = img_obj.resize((new_W, new_H), Image.BILINEAR)
         img = np.array(img_obj, img.dtype) # [h, w, 3], np.uint8
 
         seg_obj = Image.fromarray(np.squeeze(stacked[:, :, 3:4]), mode='L')
-        seg_obj = seg_obj.resize((new_H, new_W), Image.NEAREST)
+        seg_obj = seg_obj.resize((new_W, new_H), Image.NEAREST)
         seg = np.array(seg_obj, seg.dtype)[..., np.newaxis] # [h, w, 1], np.uint8
 
         # standardize
