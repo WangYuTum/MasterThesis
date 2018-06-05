@@ -13,6 +13,7 @@ import os,sys
 import tensorflow as tf
 sys.path.append("..")
 from dataset import DAVIS_dataset
+from dataset import get_the_sample
 from core import resnet
 from core.nn import get_imgnet_var
 
@@ -35,10 +36,10 @@ params_model = {
     'l2_weight': 0.0002,
     'init_lr': 1e-5, # original paper: 1e-8,
     'data_format': 'NCHW', # optimal for cudnn
-    'save_path': '../data/ckpts/attention_bin/CNN-part-full-img/noBN/att_bin.ckpt',
-    'tsboard_logs': '../data/tsboard_logs/attention_bin/CNN-part-full-img/noBN',
+    'save_path': '../data/ckpts/attention_bin/CNN-part-full-img/noBN_seq/att_bin.ckpt',
+    'tsboard_logs': '../data/tsboard_logs/attention_bin/CNN-part-full-img/noBN_seq',
     'restore_imgnet': '../data/ckpts/imgnet.ckpt', # restore model from where
-    'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-full-img/att_bin.ckpt-xxx'
+    'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-full-img/noBN_seq/att_bin.ckpt-xxx'
 }
 # define epochs
 epochs = 100
@@ -87,32 +88,37 @@ with tf.Session(config=config_gpu) as sess:
     print("Starting training for {0} epochs, {1} total steps.".format(epochs, total_steps))
     for ep in range(epochs):
         print("Epoch {} ...".format(ep))
-        # train steps for each epoch
-        for local_step in range(steps_per_ep):
-            # accumulate gradients
-            for _ in range(acc_count):
-                # choose an image randomly (randomly flip/resize)
-                img, seg, weight = mydata.get_a_random_sample() # [1,h,w,3] float32, [1,h,w,1] int32, [1,h,w,1] float32
-                feed_dict_v = {feed_img: img, feed_seg: seg, feed_weight: weight}
-                # forward
-                run_result = sess.run([loss, sum_all]+grad_acc_op, feed_dict=feed_dict_v)
-                loss_ = run_result[0]
-                sum_all_ = run_result[1]
-            # BP, increment global_step by 1 automatically
-            sess.run(bp_step)
-            # save summary
-            if global_step.eval() % summary_write_interval == 0 and global_step.eval() != 0:
-                sum_writer.add_summary(sum_all_, global_step.eval())
-            # print out loss to screen
-            if global_step.eval() % print_screen_interval == 0:
-                print("Global step {0} loss: {1}".format(global_step.eval(), loss_))
-            # save .ckpt
-            if global_step.eval() % save_ckpt_interval == 0 and global_step.eval() != 0:
-                saver_parent.save(sess=sess,
-                                  save_path=params_model['save_path'],
-                                  global_step=global_step,
-                                  write_meta_graph=False)
-                print('Saved checkpoint.')
+        # permute for 60 seqs
+        for _ in range(num_seq):
+            # get a random seq data
+            seq_imgs, seq_segs = mydata.get_random_seq()
+            current_pos = 0
+            # perform 10 bp for each seq
+            for bp_id in range(steps_per_seq):
+                # acc grads
+                for grad_id in range(acc_count):
+                    img, seg, weight = get_the_sample(seq_imgs[current_pos],
+                                                      seq_segs[current_pos]) # [1,h,w,3] float32, [1,h,w,1] int32, [1,h,w,1] float32
+                    current_pos = current_pos + 1
+                    feed_dict_v = {feed_img: img, feed_seg: seg, feed_weight: weight}
+                    run_result = sess.run([loss, sum_all] + grad_acc_op, feed_dict=feed_dict_v)
+                    loss_ = run_result[0]
+                    sum_all_ = run_result[1]
+                # BP, increment global_step by 1 automatically
+                sess.run(bp_step)
+                # save summary
+                if global_step.eval() % summary_write_interval == 0 and global_step.eval() != 0:
+                    sum_writer.add_summary(sum_all_, global_step.eval())
+                # print out loss to screen
+                if global_step.eval() % print_screen_interval == 0:
+                    print("Global step {0} loss: {1}".format(global_step.eval(), loss_))
+                # save .ckpt
+                if global_step.eval() % save_ckpt_interval == 0 and global_step.eval() != 0:
+                    saver_parent.save(sess=sess,
+                                      save_path=params_model['save_path'],
+                                      global_step=global_step,
+                                      write_meta_graph=False)
+                    print('Saved checkpoint.')
     print('Finished training.')
 
 

@@ -27,10 +27,23 @@ Train full-sized images (batch=4) seq by seq only using CNN part (including feat
   * Best Test on val set so far (fine-tune, ? iters, lr=?)
     * Mean J:
     * Mean F:
+
+## To be trained (include feat reduce) - No BN, feed seq by seq
+* A new temp branch: try no BN, feed seq by seq
+* Weight init from ResNet-38 ILSVRC-ImageNet
+* Data mean/std from Implementation of ResNet-38
+* Gradient accumulate of 10
+* lr: 1e-5 (maybe try smaller or larger)
+* 100 epochs (1 epoch = 60 * 100 forwards, 60 * 10 backwards)
+* resize (0.6-1.0)/flip
+* feed out of order, each seq padded to 100, batch=1
+* More details, see the code
+* Best Test on val set so far (fine-tune, ? iters, lr=?)
+  * Mean J: 
+  * Mean F: 
  
 
 ## TODO
-* Feed seq by seq without BN (major)
 * Side supervision (depends)
 
 ## Build Enviroment (no sudo privilege)

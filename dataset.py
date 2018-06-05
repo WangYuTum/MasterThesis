@@ -301,6 +301,47 @@ class DAVIS_dataset():
 #        (done)- Subtract mean and divide var for images
 #        (done) - Dilate gts to get attention map
 
+def get_the_sample(img, seg):
+    '''
+    :param img: np.uint8, [h,w,3]
+    :param seg: np.uint8, [h,w]
+    :return: img, seg, weight. All pre-processed with appropriate shapes
+    '''
+
+    # random resize/flip
+    stacked = np.concatenate((img, seg[..., np.newaxis]), axis=-1)  # [h, w, 4]
+    if get_flip_bool():
+        stacked = np.fliplr(stacked)
+    img_H = np.shape(img)[0]
+    img_W = np.shape(img)[1]
+    scale = get_scale()
+    new_H = int(img_H * scale)
+    new_W = int(img_W * scale)
+
+    img_obj = Image.fromarray(stacked[:, :, 0:3], mode='RGB')
+    img_obj = img_obj.resize((new_W, new_H), Image.BILINEAR)
+    img = np.array(img_obj, img.dtype)  # [h, w, 3], np.uint8
+
+    seg_obj = Image.fromarray(np.squeeze(stacked[:, :, 3:4]), mode='L')
+    seg_obj = seg_obj.resize((new_W, new_H), Image.NEAREST)
+    seg = np.array(seg_obj, seg.dtype)[..., np.newaxis]  # [h, w, 1], np.uint8
+
+    # standardize
+    img = img.astype(np.float32) * 1.0 / 255.0
+    img -= data_mean
+    img /= data_std
+    seg = seg.astype(np.int32)
+
+    # get balance weight
+    weight = get_att_balance_weight(seg)  # [h,w,1]
+
+    # reshape
+    img = img[np.newaxis, ...]
+    seg = seg[np.newaxis, ...]
+    weight = weight[np.newaxis, ...]
+
+    return img, seg, weight
+
 
 def standardize(f0, f1, f2, f3, s0, s1, s2, s3):
     '''
