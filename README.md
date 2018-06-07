@@ -19,14 +19,11 @@ Train full-sized images (batch=4) seq by seq only using CNN part (including feat
 * resize (0.6-1.0)/flip
 * feed out of order, each seq padded to 100, batch=1
 * More details, see the code
-* Best Test on val set so far (fine-tune, 500 iters, lr=1e-6)
-  * Mean J: 0.69419
-  * Mean F: 0.70301
-* Re-training (because previous resize method failed)
+* Result from 100 ep (maybe try other ep)
   * Same hyper-params as before
-  * Best Test on val set so far (fine-tune, ? iters, lr=?)
-    * Mean J:
-    * Mean F:
+  * Best Test on val set so far (fine-tune, 500 iters, lr=1e-6)
+    * Mean J: 0.70597
+    * Mean F: 0.71415
  
 
 ## TODO

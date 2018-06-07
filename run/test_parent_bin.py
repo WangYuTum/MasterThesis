@@ -20,7 +20,7 @@ FINE_TUNE = arg_fine_tune
 FINE_TUNE_seq = arg_fine_tune_seq # max 30
 
 # config device
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 config_gpu = tf.ConfigProto()
 config_gpu.gpu_options.allow_growth = True
 #config_gpu.gpu_options.per_process_gpu_memory_fraction = 0.6
@@ -63,11 +63,11 @@ if FINE_TUNE == 1:
     params_model = {
         'batch': 1,
         'l2_weight': 0.0002,
-        'init_lr': 1e-7, # original paper: 1e-8, can be further tuned
+        'init_lr': 1e-6, # original paper: 1e-8, can be further tuned
         'data_format': 'NCHW', # optimal for cudnn
         'save_path': '../data/ckpts/fine-tune/attention_bin/CNN-part-full-img/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt',
         'tsboard_logs': '../data/tsboard_logs/fine-tune/attention_bin/CNN-part-full-img/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1],
-        'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-full-img/att_bin.ckpt-60000'
+        'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-full-img/noBN/att_bin.ckpt-60000'
     }
     global_iters = 1000 # original paper: 500
     save_ckpt_interval = 500
@@ -81,7 +81,7 @@ else:
         'batch': 1,
         'data_format': 'NCHW',  # optimal for cudnn
         #'restore_fine-tune_bin': '../data/ckpts/attention_bin/CNN-part-full-img/att_bin.ckpt-90000',
-        'restore_fine-tune_bin': '../data/ckpts/fine-tune/attention_bin/CNN-part-full-img/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt-60500',
+        'restore_fine-tune_bin': '../data/ckpts/fine-tune/attention_bin/CNN-part-full-img/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt-61000',
         'save_result_path': '../data/results/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]
     }
 
@@ -140,7 +140,8 @@ with tf.Session(config=config_gpu) as sess:
             _ = sess.run(bp_step)
 
             if global_step.eval() % summary_write_interval == 0:
-                sum_writer.add_summary(sum_all_, global_step.eval())
+                # sum_writer.add_summary(sum_all_, global_step.eval())
+                pass
             if global_step.eval() % print_screen_interval == 0:
                 print("Fine-tune step {0} loss: {1}".format(global_step.eval(), loss_))
             if global_step.eval() % save_ckpt_interval == 0 and global_step.eval() != 0:
