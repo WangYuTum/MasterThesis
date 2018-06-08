@@ -25,7 +25,7 @@ Train full-sized images (batch=4) seq by seq only using CNN part (including feat
 * Retraining:
   * Because the previous resize method failed.
   
-## Train ongoing (include feat reduce) - BN, random feed
+## Trained result (include feat reduce) - BN, random feed
 * Weight init from ResNet-38 ILSVRC-ImageNet, including BN mean/var
 * Data mean/std from Implementation of ResNet-38
 * Batch = 2
@@ -34,10 +34,10 @@ Train full-sized images (batch=4) seq by seq only using CNN part (including feat
 * resize (0.6-1.0)/flip
 * feed out of order, each seq padded to 100
 * More details, see the code
-* Best Test on val set so far (fine-tune, ? iters, lr=?)
-  * Mean J: 
-  * Mean F: 
-* TODO:
+* Best Test on val set so far (fine-tune, 1000 iters, lr=1e-6, freeze BN stats)
+  * Mean J: 0.71939
+  * Mean F: 0.75054
+* TODO (depend):
   * Increase batch_size by accumulate gradients
  
 
