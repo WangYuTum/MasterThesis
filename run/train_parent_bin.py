@@ -18,7 +18,7 @@ from core import resnet
 from core.nn import get_imgnet_var
 
 # config device
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 config_gpu = tf.ConfigProto()
 config_gpu.gpu_options.allow_growth = True
 #config_gpu.gpu_options.per_process_gpu_memory_fraction = 0.95
@@ -33,20 +33,20 @@ with tf.device('/cpu:0'):
 
 # config train params
 params_model = {
-    'batch': 2, # feed batch of random images at a time
+    'batch': 4, # feed batch of random images at a time
     'l2_weight': 0.0002,
     'init_lr': 1e-5, # original paper: 1e-8,
     'data_format': 'NCHW', # optimal for cudnn
-    'save_path': '../data/ckpts/attention_bin/CNN-part-full-img/BN/att_bin.ckpt',
-    'tsboard_logs': '../data/tsboard_logs/attention_bin/CNN-part-full-img/BN/',
+    'save_path': '../data/ckpts/attention_bin/CNN-part-full-img/BN4/att_bin.ckpt',
+    'tsboard_logs': '../data/tsboard_logs/attention_bin/CNN-part-full-img/BN4/',
     'restore_imgnet': '../data/ckpts/imgnet.ckpt', # restore model from where
-    'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-full-img/BN/att_bin.ckpt-xxx'
+    'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-full-img/BN4/att_bin.ckpt-xxx'
 }
 # define epochs
 epochs = 100
 frames_per_seq = 100 # each seq is extended to 100 frames by padding previous frames inversely
 num_seq = 60
-steps_per_ep = int(num_seq * frames_per_seq / params_model['batch']) # 3000 for batch of 2
+steps_per_ep = int(num_seq * frames_per_seq / params_model['batch']) # 3000 for batch of 2, 1500 for batch 4
 total_steps = epochs * steps_per_ep # total steps of BP, 150000
 global_step = tf.Variable(0, name='global_step', trainable=False) # incremented automatically by 1 after 1 BP
 save_ckpt_interval = steps_per_ep * 20 # corresponds to 20 epoch

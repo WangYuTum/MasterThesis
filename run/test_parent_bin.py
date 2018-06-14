@@ -67,7 +67,7 @@ if FINE_TUNE == 1:
         'data_format': 'NCHW', # optimal for cudnn
         'save_path': '../data/ckpts/fine-tune/attention_bin/CNN-part-full-img/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt',
         'tsboard_logs': '../data/tsboard_logs/fine-tune/attention_bin/CNN-part-full-img/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1],
-        'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-full-img/BN/att_bin.ckpt-300000'
+        'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-full-img/BN4/att_bin.ckpt-150000'
     }
     global_iters = 1000 # original paper: 500
     save_ckpt_interval = 500
@@ -80,7 +80,7 @@ else:
         'batch': 1,
         'data_format': 'NCHW',  # optimal for cudnn
         #'restore_fine-tune_bin': '../data/ckpts/attention_bin/CNN-part-full-img/att_bin.ckpt-90000',
-        'restore_fine-tune_bin': '../data/ckpts/fine-tune/attention_bin/CNN-part-full-img/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt-300500',
+        'restore_fine-tune_bin': '../data/ckpts/fine-tune/attention_bin/CNN-part-full-img/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt-151000',
         'save_result_path': '../data/results/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]
     }
 
