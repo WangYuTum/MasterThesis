@@ -69,8 +69,8 @@ if FINE_TUNE == 1:
         'tsboard_logs': '../data/tsboard_logs/fine-tune/attention_bin/CNN-part-full-img/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1],
         'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-full-img/BN4/att_bin.ckpt-150000'
     }
-    global_iters = 1000 # original paper: 500
-    save_ckpt_interval = 500
+    global_iters = 500 # original paper: 500
+    save_ckpt_interval = 250
     summary_write_interval = 10
     print_screen_interval = 10
     global_step = tf.Variable(0, name='global_step',
@@ -80,7 +80,7 @@ else:
         'batch': 1,
         'data_format': 'NCHW',  # optimal for cudnn
         #'restore_fine-tune_bin': '../data/ckpts/attention_bin/CNN-part-full-img/att_bin.ckpt-90000',
-        'restore_fine-tune_bin': '../data/ckpts/fine-tune/attention_bin/CNN-part-full-img/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt-151000',
+        'restore_fine-tune_bin': '../data/ckpts/fine-tune/attention_bin/CNN-part-full-img/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt-150250',
         'save_result_path': '../data/results/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]
     }
 

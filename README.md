@@ -37,12 +37,12 @@ Train full-sized images (batch=4) seq by seq only using CNN part (including feat
 * Best Test on val set so far (fine-tune, 1000 iters, lr=1e-6, freeze BN stats)
   * Mean J: 0.71939
   * Mean F: 0.75054
-* TODO (depend):
-  * Increase batch_size by accumulate gradients
+* Use batch=4 (fine-tune, 500 iters, lr=1e-6, freeze BN stats)
+  * Mean J: 0.71025
+  * Mean F: 0.74904
  
 
 ## TODO
-* Feed seq by seq w/o BN (major)
 * Side supervision (depends)
 
 ## Build Enviroment (no sudo privilege)
