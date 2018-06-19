@@ -35,10 +35,10 @@ params_model = {
     'l2_weight': 0.0002,
     'init_lr': 1e-5, # original paper: 1e-8,
     'data_format': 'NCHW', # optimal for cudnn
-    'save_path': '../data/ckpts/attention_bin/CNN-part-full-img/noBN/att_bin.ckpt',
-    'tsboard_logs': '../data/tsboard_logs/attention_bin/CNN-part-full-img/noBN',
+    'save_path': '../data/ckpts/attention_bin/CNN-part-gate-img/att_bin.ckpt',
+    'tsboard_logs': '../data/tsboard_logs/attention_bin/CNN-part-gate-img',
     'restore_imgnet': '../data/ckpts/imgnet.ckpt', # restore model from where
-    'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-full-img/att_bin.ckpt-xxx'
+    'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-gate-img/att_bin.ckpt-xxx'
 }
 # define epochs
 epochs = 100
@@ -57,16 +57,18 @@ print_screen_interval = 20
 feed_img = tf.placeholder(tf.float32, (params_model['batch'], None, None, 3))
 feed_seg = tf.placeholder(tf.int32, (params_model['batch'], None, None, 1))
 feed_weight = tf.placeholder(tf.float32, (params_model['batch'], None, None, 1))
+feed_att = tf.placeholder(tf.int32, (params_model['batch'], None, None, 1))
 
 # display
 sum_img = tf.summary.image('img', feed_img)
 sum_seg = tf.summary.image('seg', tf.cast(feed_seg, tf.float16))
 sum_w = tf.summary.image('weight', feed_weight)
+sum_att = tf.summary.image('att', tf.cast(feed_att, tf.float16))
 
 
 # build network, on GPU by default
 model = resnet.ResNet(params_model)
-loss, bp_step, grad_acc_op = model.train(feed_img, feed_seg, feed_weight, global_step, acc_count)
+loss, bp_step, grad_acc_op = model.train(feed_img, feed_seg, feed_weight, feed_att, global_step, acc_count)
 init_op = tf.global_variables_initializer()
 sum_all = tf.summary.merge_all()
 
@@ -92,8 +94,8 @@ with tf.Session(config=config_gpu) as sess:
             # accumulate gradients
             for _ in range(acc_count):
                 # choose an image randomly (randomly flip/resize)
-                img, seg, weight = mydata.get_a_random_sample() # [1,h,w,3] float32, [1,h,w,1] int32, [1,h,w,1] float32
-                feed_dict_v = {feed_img: img, feed_seg: seg, feed_weight: weight}
+                img, seg, weight, att = mydata.get_a_random_sample() # [1,h,w,3] float32, [1,h,w,1] int32, [1,h,w,1] float32
+                feed_dict_v = {feed_img: img, feed_seg: seg, feed_weight: weight, feed_att: att}
                 # forward
                 run_result = sess.run([loss, sum_all]+grad_acc_op, feed_dict=feed_dict_v)
                 loss_ = run_result[0]
@@ -114,12 +116,4 @@ with tf.Session(config=config_gpu) as sess:
                                   write_meta_graph=False)
                 print('Saved checkpoint.')
     print('Finished training.')
-
-
-
-
-
-
-
-
 

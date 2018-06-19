@@ -178,21 +178,28 @@ class DAVIS_dataset():
         seg_obj = seg_obj.resize((new_W, new_H), Image.NEAREST)
         seg = np.array(seg_obj, seg.dtype)[..., np.newaxis] # [h, w, 1], np.uint8
 
+        # Gating operation
+        struct1 = generate_binary_structure(2, 2)
+        att = binary_dilation(np.squeeze(seg), structure=struct1, iterations=30).astype(seg.dtype)
+
         # standardize
         img = img.astype(np.float32) * 1.0 / 255.0
         img -= data_mean
         img /= data_std
-        seg = seg.astype(np.int32)
+        seg = seg.astype(np.int32) # [h, w, 1], np.int32
+        att = att.astype(np.int32)[..., np.newaxis] # [h, w, 1], np.int32
 
         # get balance weight
-        weight = get_att_balance_weight(seg) # [h,w,1]
+        weight = get_seg_balance_weight(seg, att) # [h,w,1], np.float32
+        # weight = get_att_balance_weight(seg) # [h,w,1]
 
         # reshape
         img = img[np.newaxis, ...]
         seg = seg[np.newaxis, ...]
         weight = weight[np.newaxis, ...]
+        att = att[np.newaxis, ...]
 
-        return img, seg, weight
+        return img, seg, weight, att
 
 
     def _get_val_data(self):

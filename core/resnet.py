@@ -28,7 +28,7 @@ class ResNet():
         if self._data_format is not "NCHW" and self._data_format is not "NHWC":
             sys.exit("Invalid data format. Must be either 'NCHW' or 'NHWC'.")
 
-    def _build_model(self, images):
+    def _build_model(self, images, atts):
         '''
         :param images: [1,H,W,3], tf.float32
         :return: segmentation output before softmax
@@ -38,6 +38,9 @@ class ResNet():
         im_size = tf.shape(images)
         if self._data_format == "NCHW":
             images = tf.transpose(images, [0,3,1,2])    # [N,C,H,W]
+
+        ## attention gating on raw images, assuming batch=1
+        images = self._att_gate(images, atts)
 
         ## The following 'main' scope is the primary (shared) feature layers, downsampling 16x
         shape_dict = {}
@@ -180,7 +183,20 @@ class ResNet():
 
         return seg_out
 
-    def _seg_loss(self, seg_out, seg_gt, seg_weight):
+    def _att_gate(self, images, atts):
+        '''
+        :param images: [1,H,W,3] or [1,3,H,W], tf.float32
+        :param atts: [1,H,W,1], tf.int32
+        :return: gated image
+        '''
+        if self._data_format == 'NCHW':
+            atts = tf.transpose(atts, [0, 3, 1, 2])
+        att_mask = tf.cast(atts, tf.float32)
+        gated_img = tf.multiply(images, att_mask)
+
+        return gated_img
+
+    def _seg_loss(self, seg_out, seg_gt, seg_weight, att):
         '''
         :param seg_out: logits, [4,H,W,2] or [4,2,H,W], tf.float32
         :param seg_gt: [4,H,W,1], tf.int32
@@ -190,23 +206,25 @@ class ResNet():
 
         loss = self._balanced_cross_entropy(input_tensor=seg_out,
                                             labels=seg_gt,
-                                            weight=seg_weight)
+                                            weight=seg_weight,
+                                            att=att)
         tf.summary.scalar('seg_loss', loss)
 
         return loss
 
-    def train(self, feed_img, feed_seg, feed_weight, global_step, acc_count):
+    def train(self, feed_img, feed_seg, feed_weight, feed_att, global_step, acc_count):
         '''
         :param feed_img: [1,H,W,3], tf.float32
         :param feed_seg: [1,H,W,1], tf.int32
         :param feed_weight: [1,H,W,1], tf.float32
+        :param feed_att: [1,H,W,1], tf.int32
         :param global_step: keep track of global train step
         :param acc_count: number of accumulated gradients
         :return: total_loss, train_step_op, grad_acc_op
         '''
 
-        seg_out = self._build_model(feed_img) # seg_out shape: [1,H,W,2] or [1,2,H,W] with original input image size
-        total_loss = self._seg_loss(seg_out, feed_seg, feed_weight) \
+        seg_out = self._build_model(feed_img, feed_att) # seg_out shape: [1,H,W,2] or [1,2,H,W] with original input image size
+        total_loss = self._seg_loss(seg_out, feed_seg, feed_weight, feed_att) \
                      + self._l2_loss()
         tf.summary.scalar('total_loss', total_loss)
 
@@ -252,7 +270,7 @@ class ResNet():
 
         return update_op, grad_accumulator_op
 
-    def _balanced_cross_entropy(self, input_tensor, labels, weight):
+    def _balanced_cross_entropy(self, input_tensor, labels, weight, att):
         '''
         :param input_tensor: the output of final layer, must have shape [batch, C, H, W] or [batch, H, W, C], tf.float32
         :param labels: the gt binary labels, have the shape [batch, H, W, C], tf.int32
@@ -263,9 +281,18 @@ class ResNet():
         if self._data_format == "NCHW":
             input_tensor = tf.transpose(input_tensor, [0, 2, 3, 1]) # to NHWC
         input_shape = tf.shape(input_tensor)
-        feed_logits = tf.reshape(input_tensor, [input_shape[0], input_shape[1]*input_shape[2], input_shape[3]])
-        feed_labels = tf.reshape(labels, [input_shape[0], input_shape[1]*input_shape[2]])
-        feed_weight = tf.reshape(weight, [input_shape[0], input_shape[1]*input_shape[2]])
+        #feed_logits = tf.reshape(input_tensor, [input_shape[0], input_shape[1]*input_shape[2], input_shape[3]])
+        #feed_labels = tf.reshape(labels, [input_shape[0], input_shape[1]*input_shape[2]])
+        #feed_weight = tf.reshape(weight, [input_shape[0], input_shape[1]*input_shape[2]])
+
+        att_mask = tf.reshape(att, [input_shape[0]*input_shape[1]*input_shape[2]])
+        bool_mask = tf.cast(att_mask, tf.bool)
+        feed_weight = tf.reshape(weight, [input_shape[0]*input_shape[1]*input_shape[2]])
+        feed_weight = tf.boolean_mask(feed_weight, bool_mask)
+        feed_labels = tf.reshape(labels, [input_shape[0]*input_shape[1]*input_shape[2]])
+        feed_labels = tf.boolean_mask(feed_labels, bool_mask)
+        feed_logits = tf.reshape(input_tensor, [input_shape[0]*input_shape[1]*input_shape[2], input_shape[3]])
+        feed_logits = tf.boolean_mask(feed_logits, bool_mask)
 
         cross_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=feed_labels, logits=feed_logits)
         balanced_loss = tf.multiply(cross_loss, feed_weight)
