@@ -279,28 +279,53 @@ class DAVIS_dataset():
         # convert to binary
         gt_bool = np.greater(gt, 0)
         gt_bin = gt_bool.astype(np.uint8)
-
         gt = np.expand_dims(gt_bin, axis=-1) # [H,W,1]
+
+        struct1 = generate_binary_structure(2, 2)
+        att = binary_dilation(np.squeeze(gt), structure=struct1, iterations=30).astype(gt.dtype)
+
+        gt = gt.astype(np.int32) # [h, w, 1], np.int32
         pair.append(gt)
+        att = att.astype(np.int32)[..., np.newaxis] # [h, w, 1], np.int32
+
+        # get balance weight
+        weight = get_seg_balance_weight(gt, att) # [h,w,1], np.float32
+        pair.append(weight)
+        pair.append(att)
 
         # Compute balanced weight for training, [H,W,1]
-        num_pos = np.sum(gt)
-        num_neg = np.sum(1-gt)
-        num_total = num_pos + num_neg
-        weight_pos = num_neg.astype(np.float32) / num_total.astype(np.float32)
-        weight_neg = 1.0 - weight_pos
-        mat_pos = np.multiply(gt.astype(np.float32), weight_pos)
-        mat_neg = np.multiply((1.0-gt).astype(np.float32), weight_neg)
-        mat_weight = np.add(mat_pos, mat_neg)
-        pair.append(mat_weight)
+        # num_pos = np.sum(gt)
+        # num_neg = np.sum(1-gt)
+        # num_total = num_pos + num_neg
+        # weight_pos = num_neg.astype(np.float32) / num_total.astype(np.float32)
+        # weight_neg = 1.0 - weight_pos
+        # mat_pos = np.multiply(gt.astype(np.float32), weight_pos)
+        # mat_neg = np.multiply((1.0-gt).astype(np.float32), weight_neg)
+        # mat_weight = np.add(mat_pos, mat_neg)
+        # pair.append(mat_weight)
 
         return pair
 
     def get_test_frames(self):
 
-        frame_list = self._val_seq_frames[1:]
+        # Assuming we know the attention area/window
+        frame_list = self._val_seq_frames[1:] # shape of frame [h,w,3]
+        num_frames = len(frame_list)
+        frame_pair = []
+        gt_search_path = os.path.join(self._seq_path.replace('JPEGImages', 'Annotations'), '*.png')
+        files_gt = glob.glob(gt_search_path)
+        files_gt.sort()
+        for i in range(num_frames):
+            frame_gt = np.array(Image.open(files_gt[i+1])).astype(np.uint8)
+            # convert to binary
+            gt_bool = np.greater(frame_gt, 0)
+            gt_bin = gt_bool.astype(np.uint8) # [h,w], np.uint8
+            struct1 = generate_binary_structure(2, 2)
+            att = binary_dilation(gt_bin, structure=struct1, iterations=30).astype(gt_bin.dtype)
+            att = att.astype(np.int32)[..., np.newaxis]  # [h, w, 1], np.int32
+            frame_pair.append([frame_list[i], att])
 
-        return frame_list
+        return frame_pair
 
 #     Pre-processing(called in train script):
 #        (done)- Convert np.uint8 to proper datatype(np.float32 for imgs, np.int32 for gts)

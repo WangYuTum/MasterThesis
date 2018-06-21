@@ -309,12 +309,12 @@ class ResNet():
 
         return loss
 
-    def test(self, images):
+    def test(self, images, atts):
         '''
         :param images: batchs/single image have shape [batch, H, W, 3]
         :return: probability map, binary mask
         '''
-        net_out = self._build_model(images) # [batch, 2, H, W] or [batch, H, W, 2]
+        net_out = self._build_model(images, atts) # [batch, 2, H, W] or [batch, H, W, 2]
         if self._data_format == "NCHW":
             net_out = tf.transpose(net_out, [0, 2, 3, 1])
         prob_map = tf.nn.softmax(net_out) # [batch, H, W, 2]

@@ -25,7 +25,7 @@ Train full-sized images (batch=4) seq by seq only using CNN part (including feat
     * Mean J: 0.70597
     * Mean F: 0.71415
     
-## Train ongoing (include feat reduce) - No BN, random feed, gate img
+## Trained result (include feat reduce) - No BN, random feed, gate img
 * Weight init from ResNet-38 ILSVRC-ImageNet
 * Data mean/std from Implementation of ResNet-38
 * Gradient accumulate of 10
@@ -37,8 +37,8 @@ Train full-sized images (batch=4) seq by seq only using CNN part (including feat
 * Result from 100 ep (maybe try other ep)
   * Same hyper-params as before
   * Best Test on val set so far (fine-tune, 500 iters, lr=1e-6)
-    * Mean J: 
-    * Mean F: 
+    * Mean J: 0.86866
+    * Mean F: 0.91311
  
 
 ## TODO
