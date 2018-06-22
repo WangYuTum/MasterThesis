@@ -31,44 +31,43 @@ with tf.device('/cpu:0'):
 
 # config train params
 params_model = {
-    'batch': 1, # feed a random image at a time
-    'l2_weight': 0.0002,
+    'batch': 2, # feed a random image at a time
+    'l2_weight': 2e-6, # 2e-4
     'init_lr': 1e-5, # original paper: 1e-8,
     'data_format': 'NCHW', # optimal for cudnn
-    'save_path': '../data/ckpts/attention_bin/CNN-part-gate-img/att_bin.ckpt',
-    'tsboard_logs': '../data/tsboard_logs/attention_bin/CNN-part-gate-img',
-    'restore_imgnet': '../data/ckpts/imgnet.ckpt', # restore model from where
-    'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-gate-img/att_bin.ckpt-xxx'
+    'save_path': '../data/ckpts/attention_bin/CNN-freeze-gate-img-att/att_bin.ckpt',
+    'tsboard_logs': '../data/tsboard_logs/attention_bin/CNN-freeze-gate-img-att',
+    'restore_imgnet': '../data/ckpts/attention_bin/CNN-part-gate-img/att_bin.ckpt-60000', # restore model from where
+    'restore_parent_bin': '../data/ckpts/attention_bin/CNN-freeze-gate-img-att/att_bin.ckpt-xxx'
 }
 # define epochs
 epochs = 100
 frames_per_seq = 100 # each seq is extended to 100 frames by padding previous frames inversely
-steps_per_seq = 10 # because accumulate gradients 10 times before BP
+steps_per_seq = 5 # because accumulate gradients 10 times before BP
 num_seq = 60
-steps_per_ep = num_seq * steps_per_seq
+steps_per_ep = num_seq * steps_per_seq # 300
 acc_count = 10 # accumulate 10 gradients
-total_steps = epochs * steps_per_ep # total steps of BP, 60000
+total_steps = epochs * steps_per_ep # total steps of BP, 30000
 global_step = tf.Variable(0, name='global_step', trainable=False) # incremented automatically by 1 after 1 BP
-save_ckpt_interval = 12000 # corresponds to 20 epoch
-summary_write_interval = 50
-print_screen_interval = 20
+save_ckpt_interval = 6000 # corresponds to 20 epoch
+summary_write_interval = 20
+print_screen_interval = 10
 
 # define placeholders
 feed_img = tf.placeholder(tf.float32, (params_model['batch'], None, None, 3))
-feed_seg = tf.placeholder(tf.int32, (params_model['batch'], None, None, 1))
-feed_weight = tf.placeholder(tf.float32, (params_model['batch'], None, None, 1))
 feed_att = tf.placeholder(tf.int32, (params_model['batch'], None, None, 1))
+feed_oracle = tf.placeholder(tf.int32, (params_model['batch']-1, None, None, 1))
+feed_weight = tf.placeholder(tf.float32, (params_model['batch']-1, None, None, 1))
 
 # display
 sum_img = tf.summary.image('img', feed_img)
-sum_seg = tf.summary.image('seg', tf.cast(feed_seg, tf.float16))
-sum_w = tf.summary.image('weight', feed_weight)
 sum_att = tf.summary.image('att', tf.cast(feed_att, tf.float16))
-
+sum_oracle = tf.summary.image('oracle', tf.cast(feed_oracle, tf.float16))
+sum_w = tf.summary.image('weight', feed_weight)
 
 # build network, on GPU by default
 model = resnet.ResNet(params_model)
-loss, bp_step, grad_acc_op = model.train(feed_img, feed_seg, feed_weight, feed_att, global_step, acc_count)
+loss, bp_step, grad_acc_op = model.train(feed_img, feed_weight, feed_att, feed_oracle, global_step, acc_count)
 init_op = tf.global_variables_initializer()
 sum_all = tf.summary.merge_all()
 
@@ -94,8 +93,8 @@ with tf.Session(config=config_gpu) as sess:
             # accumulate gradients
             for _ in range(acc_count):
                 # choose an image randomly (randomly flip/resize)
-                img, seg, weight, att = mydata.get_a_random_sample() # [1,h,w,3] float32, [1,h,w,1] int32, [1,h,w,1] float32
-                feed_dict_v = {feed_img: img, feed_seg: seg, feed_weight: weight, feed_att: att}
+                imgs, atts, oracle, weight= mydata.get_a_random_sample() # [2,h,w,3] f32, [2,h,w,1] i32, [1,h,w,1] i32, [1,h,w,1] f32
+                feed_dict_v = {feed_img: imgs, feed_att: atts, feed_weight: weight, feed_oracle: oracle}
                 # forward
                 run_result = sess.run([loss, sum_all]+grad_acc_op, feed_dict=feed_dict_v)
                 loss_ = run_result[0]

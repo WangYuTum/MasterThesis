@@ -21,16 +21,18 @@ class ResNet():
         '''
 
         self._data_format = params.get('data_format', None)
-        self._batch = params.get('batch', 1)
+        self._batch = params.get('batch', 2)
         self._l2_weight = params.get('l2_weight', 0.0002)
         self._init_lr = params.get('init_lr', 1e-5)
 
         if self._data_format is not "NCHW" and self._data_format is not "NHWC":
             sys.exit("Invalid data format. Must be either 'NCHW' or 'NHWC'.")
 
-    def _build_model(self, images, atts):
+    def _build_model(self, images, atts, att_oracles):
         '''
         :param images: [1,H,W,3], tf.float32
+        :param atts: [1,H,W,1], tf.int32
+        :param att_oracles: [1,H,W,1], tf.int32
         :return: segmentation output before softmax
         '''
         model = {}
@@ -39,8 +41,8 @@ class ResNet():
         if self._data_format == "NCHW":
             images = tf.transpose(images, [0,3,1,2])    # [N,C,H,W]
 
-        ## attention gating on raw images, assuming batch=1
-        images = self._att_gate(images, atts)
+        ## attention gating on raw images, assuming batch=2
+        images = self._att_gate(images, atts, att_oracles)
 
         ## The following 'main' scope is the primary (shared) feature layers, downsampling 16x
         shape_dict = {}
@@ -172,29 +174,93 @@ class ResNet():
                 else:
                     side_reduced_f = tf.image.resize_images(side_reduced, [im_size[1], im_size[2]])  # NHWC
 
-            # concat and linearly fuse
+            # Concat for each batch. Try gating Feature of t before concat later.
             if self._data_format == "NCHW":
-                concat_seg_feat = tf.concat([side_2_f, side_4_f, side_8_f, side_16_f, side_reduced_f], axis=1)
+                concat_feat0 = tf.concat([side_2_f[0:1,:,:,:], side_4_f[0:1,:,:,:],
+                                          side_8_f[0:1,:,:,:], side_16_f[0:1,:,:,:],
+                                          side_reduced_f[0:1,:,:,:]], axis=1)
+                concat_feat1 = tf.concat([side_2_f[1:2,:,:,:], side_4_f[1:2,:,:,:],
+                                          side_8_f[1:2,:,:,:], side_16_f[1:2,:,:,:],
+                                          side_reduced_f[1:2,:,:,:]], axis=1)
             else:
-                concat_seg_feat = tf.concat([side_2_f, side_4_f, side_8_f, side_16_f, side_reduced_f], axis=3)
+                concat_feat0 = tf.concat([side_2_f[0:1,:,:,:], side_4_f[0:1,:,:,:],
+                                          side_8_f[0:1,:,:,:], side_16_f[0:1,:,:,:],
+                                          side_reduced_f[0:1,:,:,:]], axis=3)
+                concat_feat1 = tf.concat([side_2_f[1:2,:,:,:], side_4_f[1:2,:,:,:],
+                                          side_8_f[1:2,:,:,:], side_16_f[1:2,:,:,:],
+                                          side_reduced_f[1:2,:,:,:]], axis=3)
+            concat_feats = tf.concat([concat_feat0, concat_feat1], axis=0)
+            # Attention CNN part
+            with tf.variable_scope('att_cnn'):
+                # fuse features from different levels
+                shape_dict['att_aggregate'] = [1,1,80,64]
+                with tf.variable_scope('att_aggregate'):
+                    feat_agg = nn.conv_layer(self._data_format, concat_feats, 1, 'SAME', shape_dict['att_aggregate'])
+                    feat_agg = nn.bias_layer(self._data_format, feat_agg, 64) # [2,h,w,64] or [2,64,h,w]
+                # concat feat0 and feat1
+                if self._data_format == 'NCHW':
+                    feat_corr = tf.concat([feat_agg[0:1,:,:,:], feat_agg[1:2,:,:,:]], axis=1) # [1,128,h,w]
+                else:
+                    feat_corr = tf.concat([feat_agg[1:2,:,:,:], feat_agg[1:2,:,:,:]], axis=3) # [1,h,w,128]
+                # att cnn main convs
+                shape_dict['att_conv1'] = [1, 1, 128, 64]
+                with tf.variable_scope('conv1'):
+                    model['att_conv1'] = nn.conv_layer(self._data_format, feat_corr, 1, 'SAME',
+                                                       shape_dict['att_conv1'])
+                with tf.variable_scope('bias1'):
+                    model['att_bias1'] = nn.bias_layer(self._data_format, model['att_conv1'], 64)
+                model['att_act1'] = nn.ReLu_layer(model['att_bias1']) # [2,h,w,64] or [2,64,h,w]
+
+                shape_dict['att_conv2'] = [1, 1, 64, 64]
+                with tf.variable_scope('conv2'):
+                    model['att_conv2'] = nn.conv_layer(self._data_format, model['att_act1'], 1, 'SAME',
+                                                       shape_dict['att_conv2'])
+                with tf.variable_scope('bias2'):
+                    model['att_bias2'] = nn.bias_layer(self._data_format, model['att_conv2'], 64)
+                model['att_act2'] = nn.ReLu_layer(model['att_bias2']) # [2,h,w,64] or [2,64,h,w]
+
+                shape_dict['att_conv3'] = [1, 1, 64, 64]
+                with tf.variable_scope('conv3'):
+                    model['att_conv3'] = nn.conv_layer(self._data_format, model['att_act2'], 1, 'SAME',
+                                                       shape_dict['att_conv3'])
+                with tf.variable_scope('bias3'):
+                    model['att_bias3'] = nn.bias_layer(self._data_format, model['att_conv3'], 64)
+                model['att_act3'] = nn.ReLu_layer(model['att_bias3']) # [2,h,w,64] or [2,64,h,w]
+
+                with tf.variable_scope('att_fuse'):
+                    att_out = nn.conv_layer(self._data_format, model['att_act3'], 1, 'SAME', [1, 1, 64, 2])
+                    att_out = nn.bias_layer(self._data_format, att_out, 2)
+
+            # this part serves the segmentation within attention window, no use in this experiment
             with tf.variable_scope('fuse'):
-                seg_out = nn.conv_layer(self._data_format, concat_seg_feat, 1, 'SAME', [1, 1, 80, 2])
+                seg_out = nn.conv_layer(self._data_format, concat_feats, 1, 'SAME', [1, 1, 80, 2])
                 seg_out = nn.bias_layer(self._data_format, seg_out, 2)
 
-        return seg_out
+        return att_out
 
-    def _att_gate(self, images, atts):
+    def _att_gate(self, images, atts, att_oracles):
         '''
         :param images: [1,H,W,3] or [1,3,H,W], tf.float32
         :param atts: [1,H,W,1], tf.int32
-        :return: gated image
+        :param att_oracles: [1,H,W,1], tf.int32
+        :return: gated images as batch of 2
         '''
+
+        # get attention mask prepared
         if self._data_format == 'NCHW':
             atts = tf.transpose(atts, [0, 3, 1, 2])
-        att_mask = tf.cast(atts, tf.float32)
-        gated_img = tf.multiply(images, att_mask)
+            att_oracles = tf.transpose(att_oracles, [0, 3, 1, 2])
+            att_mask = tf.cast(atts, tf.float32)
+            oracle_mask = tf.cast(att_oracles, tf.float32)
 
-        return gated_img
+        # Gate op
+        gated_img0 = tf.multiply(images[0:1,:,:,:], att_mask)
+        gated_img1 = tf.multiply(images[1:2,:,:,:], oracle_mask)
+
+        # resemble as a batch of 2
+        gated_imgs = tf.concat([gated_img0, gated_img1], axis=0) # [2,h,w,3] or [2,3,h,w]
+
+        return gated_imgs
 
     def _seg_loss(self, seg_out, seg_gt, seg_weight, att):
         '''
@@ -212,28 +278,43 @@ class ResNet():
 
         return loss
 
-    def train(self, feed_img, feed_seg, feed_weight, feed_att, global_step, acc_count):
+    def _att_loss(self, att_out, att_gt, att_weight):
         '''
-        :param feed_img: [1,H,W,3], tf.float32
-        :param feed_seg: [1,H,W,1], tf.int32
+        :param att_out: logits, [1,H,W,2] or [1,2,H,W], tf.float32
+        :param att_gt: [1,H,W,1], tf.int32
+        :param att_weight: [1,H,W,1], tf.float32
+        :return: scalar (balanced cross-entropy), tf.float32
+        '''
+
+        loss = self._balanced_cross_entropy_v2(input_tensor=att_out,
+                                               labels=att_gt,
+                                               weight=att_weight)
+        tf.summary.scalar('seg_loss', loss)
+
+        return loss
+
+    def train(self, feed_img, feed_weight, feed_att, feed_oracle, global_step, acc_count):
+        '''
+        :param feed_img: [2,H,W,3], tf.float32
         :param feed_weight: [1,H,W,1], tf.float32
-        :param feed_att: [1,H,W,1], tf.int32
+        :param feed_att: [2,H,W,1], tf.int32
+        :param feed_oracle: [1,H,W,1], tf.int32
         :param global_step: keep track of global train step
         :param acc_count: number of accumulated gradients
         :return: total_loss, train_step_op, grad_acc_op
         '''
 
-        seg_out = self._build_model(feed_img, feed_att) # seg_out shape: [1,H,W,2] or [1,2,H,W] with original input image size
-        total_loss = self._seg_loss(seg_out, feed_seg, feed_weight, feed_att) \
+        att_out = self._build_model(feed_img, feed_att[0:1,:,:,:], feed_oracle) # att_out shape: [1,H,W,2] or [1,2,H,W] with original input image size
+        total_loss = self._att_loss(att_out, feed_att[1:2,:,:,:], feed_weight) \
                      + self._l2_loss()
         tf.summary.scalar('total_loss', total_loss)
 
         # display current output
         if self._data_format == "NCHW":
-            seg_pred = tf.transpose(seg_out, [0,2,3,1])
+            att_pred = tf.transpose(att_out, [0,2,3,1])
         else:
-            seg_pred = seg_out
-        tf.summary.image('pred', tf.cast(tf.nn.softmax(seg_pred)[:, :, :, 1:2], tf.float16))
+            att_pred = att_out
+        tf.summary.image('pred', tf.cast(tf.nn.softmax(att_pred)[:, :, :, 1:2], tf.float16))
 
         bp_step, grad_acc_op = self._optimize(total_loss, acc_count, global_step)
 
@@ -269,6 +350,26 @@ class ResNet():
         update_op = optimizer.apply_gradients(mean_grads_vars, global_step=global_step)
 
         return update_op, grad_accumulator_op
+
+    def _balanced_cross_entropy_v2(self, input_tensor, labels, weight):
+        '''
+        :param input_tensor: the output of final layer, must have shape [batch, C, H, W] or [batch, H, W, C], tf.float32
+        :param labels: the gt binary labels, have the shape [batch, H, W, C], tf.int32
+        :param weight: shape [batch, H, W, 1], tf.float32
+        :return: balanced cross entropy loss, a scalar, tf.float32
+        '''
+
+        if self._data_format == "NCHW":
+            input_tensor = tf.transpose(input_tensor, [0, 2, 3, 1]) # to NHWC
+        input_shape = tf.shape(input_tensor)
+        feed_logits = tf.reshape(input_tensor, [input_shape[0], input_shape[1]*input_shape[2], input_shape[3]])
+        feed_labels = tf.reshape(labels, [input_shape[0], input_shape[1]*input_shape[2]])
+        feed_weight = tf.reshape(weight, [input_shape[0], input_shape[1]*input_shape[2]])
+
+        cross_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=feed_labels, logits=feed_logits)
+        balanced_loss = tf.multiply(cross_loss, feed_weight)
+
+        return tf.reduce_mean(balanced_loss)
 
     def _balanced_cross_entropy(self, input_tensor, labels, weight, att):
         '''

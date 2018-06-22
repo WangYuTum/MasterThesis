@@ -151,55 +151,74 @@ class DAVIS_dataset():
 
     def get_a_random_sample(self):
         '''
-        :return: img [1, h, w, 3] float32, seg [1, h, w, 1] int32, weight [1, h, w, 1] float32
+        :return:
+            consecutive images: [2, h, w, 3] float32,
+            att_gt of both image:  [2, h, w, 1] int32,
+            oracle_gt of the 2nd image: [1, h, w, 1] int32,
+            weight of the 2nd att_gt: [1, h, w, 1] float32
         '''
 
         # choose an image randomly
         seq_imgs, seq_gts = self.get_random_seq() # [img0, img1, ...], [seq0, seq1, ...], both np.uint8
         rand_frame_idx = np.random.permutation(self._permut_range_frame)[0]
-        img = seq_imgs[rand_frame_idx] # [h, w, 3], np.uint8
-        seg = seq_gts[rand_frame_idx] # [h,w], np.uint8
+        while rand_frame_idx == self._max_train_len-1:
+            rand_frame_idx = np.random.permutation(self._permut_range_frame)[0]
+        img0 = seq_imgs[rand_frame_idx] # [h, w, 3], np.uint8
+        seg0 = seq_gts[rand_frame_idx] # [h,w], np.uint8
+        img1 = seq_imgs[rand_frame_idx+1] # [h, w, 3], np.uint8
+        seg1 = seq_gts[rand_frame_idx+1]  # [h,w], np.uint8
 
         # random resize/flip
-        stacked = np.concatenate((img, seg[..., np.newaxis]), axis=-1) # [h, w, 4]
+        stacked = np.concatenate((img0, seg0[..., np.newaxis], img1, seg1[..., np.newaxis]), axis=-1) # [h, w, 8]
         if get_flip_bool():
             stacked = np.fliplr(stacked)
-        img_H = np.shape(img)[0]
-        img_W = np.shape(img)[1]
+        img_H = np.shape(img0)[0]
+        img_W = np.shape(img0)[1]
         scale = get_scale()
         new_H = int(img_H * scale)
         new_W = int(img_W * scale)
 
-        img_obj = Image.fromarray(stacked[:, :, 0:3], mode='RGB')
-        img_obj = img_obj.resize((new_W, new_H), Image.BILINEAR)
-        img = np.array(img_obj, img.dtype) # [h, w, 3], np.uint8
+        img_obj0 = Image.fromarray(stacked[:, :, 0:3], mode='RGB')
+        img_obj0 = img_obj0.resize((new_W, new_H), Image.BILINEAR)
+        img0 = np.array(img_obj0, img0.dtype) # [h, w, 3], np.uint8
+        img_obj1 = Image.fromarray(stacked[:, :, 4:7], mode='RGB')
+        img_obj1 = img_obj1.resize((new_W, new_H), Image.BILINEAR)
+        img1 = np.array(img_obj1, img1.dtype) # [h, w, 3], np.uint8
 
-        seg_obj = Image.fromarray(np.squeeze(stacked[:, :, 3:4]), mode='L')
-        seg_obj = seg_obj.resize((new_W, new_H), Image.NEAREST)
-        seg = np.array(seg_obj, seg.dtype)[..., np.newaxis] # [h, w, 1], np.uint8
+        seg_obj0 = Image.fromarray(np.squeeze(stacked[:, :, 3:4]), mode='L')
+        seg_obj0 = seg_obj0.resize((new_W, new_H), Image.NEAREST)
+        seg0 = np.array(seg_obj0, seg0.dtype)[..., np.newaxis] # [h, w, 1], np.uint8
+        seg_obj1 = Image.fromarray(np.squeeze(stacked[:, :, 7:8]), mode='L')
+        seg_obj1 = seg_obj1.resize((new_W, new_H), Image.NEAREST)
+        seg1 = np.array(seg_obj1, seg1.dtype)[..., np.newaxis] # [h, w, 1], np.uint8
 
-        # Gating operation
+        # Get att mask
         struct1 = generate_binary_structure(2, 2)
-        att = binary_dilation(np.squeeze(seg), structure=struct1, iterations=30).astype(seg.dtype)
+        att0 = binary_dilation(np.squeeze(seg0), structure=struct1, iterations=30).astype(seg0.dtype)
+        att1 = binary_dilation(np.squeeze(seg1), structure=struct1, iterations=30).astype(seg1.dtype)
+        oracle = binary_dilation(np.squeeze(att1), structure=struct1, iterations=10).astype(att1.dtype)
 
         # standardize
-        img = img.astype(np.float32) * 1.0 / 255.0
-        img -= data_mean
-        img /= data_std
-        seg = seg.astype(np.int32) # [h, w, 1], np.int32
-        att = att.astype(np.int32)[..., np.newaxis] # [h, w, 1], np.int32
+        img0 = img0.astype(np.float32) * 1.0 / 255.0
+        img0 -= data_mean
+        img0 /= data_std
+        img1 = img1.astype(np.float32) * 1.0 / 255.0
+        img1 -= data_mean
+        img1 /= data_std
+        att0 = att0.astype(np.int32)[..., np.newaxis] # [h, w, 1], np.int32
+        att1 = att1.astype(np.int32)[..., np.newaxis]  # [h, w, 1], np.int32
+        oracle = oracle.astype(np.int32)[..., np.newaxis] # [h, w, 1], np.int32
 
         # get balance weight
-        weight = get_seg_balance_weight(seg, att) # [h,w,1], np.float32
-        # weight = get_att_balance_weight(seg) # [h,w,1]
+        weight = get_att_balance_weight(att1) # [h,w,1], np.float32
 
         # reshape
-        img = img[np.newaxis, ...]
-        seg = seg[np.newaxis, ...]
+        imgs = np.concatenate((img0[np.newaxis, ...], img1[np.newaxis, ...]), axis=0)
+        atts = np.concatenate((att0[np.newaxis, ...], att1[np.newaxis, ...]), axis=0)
+        oracle = oracle[np.newaxis, ...]
         weight = weight[np.newaxis, ...]
-        att = att[np.newaxis, ...]
 
-        return img, seg, weight, att
+        return imgs, atts, oracle, weight
 
 
     def _get_val_data(self):

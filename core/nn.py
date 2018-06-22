@@ -81,8 +81,14 @@ def create_conv_kernel(shape=None):
     :param shape: the shape of kernel to be created
     :return: a tf.tensor
     '''
+
+    trainable = True
+    scope_name = tf.get_variable_scope().name
+    if scope_name.find('att_cnn') == -1:
+        trainable = False
+
     init_op = tf.truncated_normal_initializer(stddev=0.001)
-    var = tf.get_variable(name='kernel', shape=shape, initializer=init_op)
+    var = tf.get_variable(name='kernel', shape=shape, initializer=init_op, trainable=trainable)
 
     return var
 
@@ -109,11 +115,6 @@ def ReLu_layer(input_tensor):
     return relu_out
 
 
-def get_conv_transpose_ksize(factor):
-    # Input: specify upsampling factor
-    return 2 * factor - factor % 2
-
-
 def bias_layer(data_format, input_tensor, shape=None):
 
     scope_name = tf.get_variable_scope().name
@@ -127,8 +128,13 @@ def bias_layer(data_format, input_tensor, shape=None):
 
 def create_bias(shape=None):
 
+    trainable = True
+    scope_name = tf.get_variable_scope().name
+    if scope_name.find('att_cnn') == -1:
+        trainable = False
+
     init = tf.zeros_initializer()
-    var = tf.get_variable('bias', initializer=init, shape=shape)
+    var = tf.get_variable('bias', initializer=init, shape=shape, trainable=trainable)
 
     return var
 
@@ -222,6 +228,19 @@ def param_lr():
     vars_lr['main/resize_side_path/kernel'] = 1.0
     vars_lr['main/resize_side_path/bias'] = 2.0
 
+    # For the attention cnn branch
+    vars_lr['main/att_cnn/att_aggregate/kernel'] = 1.0
+    vars_lr['main/att_cnn/att_aggregate/bias'] = 2.0
+    vars_lr['main/att_cnn/conv1/kernel'] = 1.0
+    vars_lr['main/att_cnn/bias1/bias'] = 2.0
+    vars_lr['main/att_cnn/conv2/kernel'] = 1.0
+    vars_lr['main/att_cnn/bias2/bias'] = 2.0
+    vars_lr['main/att_cnn/conv3/kernel'] = 1.0
+    vars_lr['main/att_cnn/bias3/bias'] = 2.0
+    vars_lr['main/att_cnn/att_fuse/kernel'] = 1.0
+    vars_lr['main/att_cnn/att_fuse/bias'] = 2.0
+
+    # For the segmentation output layer
     vars_lr['main/fuse/kernel'] = 0.01
     vars_lr['main/fuse/bias'] = 0.02
 
