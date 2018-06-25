@@ -39,6 +39,8 @@ Train full-sized images (batch=4) seq by seq only using CNN part (including feat
   * Best Test on val set so far (fine-tune, 500 iters, lr=1e-6)
     * Mean J: 0.86866
     * Mean F: 0.91311
+  * ISSUE: Very sensitive to the size of the attention area. Re-train
+    in another new branch where size of the attention area is randomized.
  
 
 ## TODO
