@@ -25,7 +25,7 @@ Train full-sized images (batch=4) seq by seq only using CNN part (including feat
     * Mean J: 0.70597
     * Mean F: 0.71415
     
-## Trained result (include feat reduce) - No BN, random feed, gate img
+## Training (include feat reduce) - No BN, random feed, gate img
 * Weight init from ResNet-38 ILSVRC-ImageNet
 * Data mean/std from Implementation of ResNet-38
 * Gradient accumulate of 10
@@ -33,14 +33,13 @@ Train full-sized images (batch=4) seq by seq only using CNN part (including feat
 * 100 epochs (1 epoch = 60 * 100 forwards, 60 * 10 backwards)
 * resize (0.6-1.0)/flip
 * feed out of order, each seq padded to 100, batch=1
+* Generate attention area with random size (dilate from 10-35)
 * More details, see the code
 * Result from 100 ep (maybe try other ep)
   * Same hyper-params as before
   * Best Test on val set so far (fine-tune, 500 iters, lr=1e-6)
-    * Mean J: 0.86866
-    * Mean F: 0.91311
-  * ISSUE: Very sensitive to the size of the attention area. Re-train
-    in another new branch where size of the attention area is randomized.
+    * Mean J:  (0.86866)
+    * Mean F:  (0.91311)
  
 
 ## TODO

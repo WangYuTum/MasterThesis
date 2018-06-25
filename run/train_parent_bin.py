@@ -35,10 +35,10 @@ params_model = {
     'l2_weight': 0.0002,
     'init_lr': 1e-5, # original paper: 1e-8,
     'data_format': 'NCHW', # optimal for cudnn
-    'save_path': '../data/ckpts/attention_bin/CNN-part-gate-img/att_bin.ckpt',
-    'tsboard_logs': '../data/tsboard_logs/attention_bin/CNN-part-gate-img',
+    'save_path': '../data/ckpts/attention_bin/CNN-part-gate-img-v2/att_bin.ckpt',
+    'tsboard_logs': '../data/tsboard_logs/attention_bin/CNN-part-gate-img-v2',
     'restore_imgnet': '../data/ckpts/imgnet.ckpt', # restore model from where
-    'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-gate-img/att_bin.ckpt-xxx'
+    'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-gate-img-v2/att_bin.ckpt-xxx'
 }
 # define epochs
 epochs = 100
