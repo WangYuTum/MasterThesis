@@ -283,7 +283,9 @@ class DAVIS_dataset():
         gt = np.expand_dims(gt_bin, axis=-1) # [H,W,1]
 
         struct1 = generate_binary_structure(2, 2)
-        att = binary_dilation(np.squeeze(gt), structure=struct1, iterations=30).astype(gt.dtype)
+        # use var-sized attention area
+        size_att = np.random.randint(9, 36)
+        att = binary_dilation(np.squeeze(gt), structure=struct1, iterations=size_att).astype(gt.dtype)
 
         gt = gt.astype(np.int32) # [h, w, 1], np.int32
         pair.append(gt)
@@ -322,7 +324,9 @@ class DAVIS_dataset():
             gt_bool = np.greater(frame_gt, 0)
             gt_bin = gt_bool.astype(np.uint8) # [h,w], np.uint8
             struct1 = generate_binary_structure(2, 2)
-            att = binary_dilation(gt_bin, structure=struct1, iterations=30).astype(gt_bin.dtype)
+            # use var-sized attention area
+            size_att = np.random.randint(9, 36)
+            att = binary_dilation(gt_bin, structure=struct1, iterations=size_att).astype(gt_bin.dtype)
             att = att.astype(np.int32)[..., np.newaxis]  # [h, w, 1], np.int32
             frame_pair.append([frame_list[i], att])
 

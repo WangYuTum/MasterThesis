@@ -25,7 +25,7 @@ Train full-sized images (batch=4) seq by seq only using CNN part (including feat
     * Mean J: 0.70597
     * Mean F: 0.71415
     
-## Training (include feat reduce) - No BN, random feed, gate img
+## Trained result (include feat reduce) - No BN, random feed, gate img v2
 * Weight init from ResNet-38 ILSVRC-ImageNet
 * Data mean/std from Implementation of ResNet-38
 * Gradient accumulate of 10
@@ -37,9 +37,19 @@ Train full-sized images (batch=4) seq by seq only using CNN part (including feat
 * More details, see the code
 * Result from 100 ep (maybe try other ep)
   * Same hyper-params as before
+  * Use attention gt in testing, but introduced randomized attention area
   * Best Test on val set so far (fine-tune, 500 iters, lr=1e-6)
-    * Mean J:  (0.86866)
-    * Mean F:  (0.91311)
+    * Mean J: 0.84292 (0.86866)
+    * Mean F: 0.88229 (0.91311)
+  * Result without using attention gt (Failed in tracking probably due to large motion or appearance change)
+    * Mean J: 0.58453
+    * Mean F: 0.60906
+  * TODO:
+    Train with random-size attention area and random-shift attention area
+  * Conclusion:
+    Varied sized attention area is okay; shifted attention area to be verified;
+    Still need reasonably accurate attention area.
+    
  
 
 ## TODO
