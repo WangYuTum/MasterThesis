@@ -50,6 +50,27 @@ Train full-sized images (batch=4) seq by seq only using CNN part (including feat
     Varied sized attention area is okay; shifted attention area to be verified;
     Still need reasonably accurate attention area.
     
+## Training (include feat reduce) - No BN, random feed, gate img v3
+* Weight init from ResNet-38 ILSVRC-ImageNet
+* Data mean/std from Implementation of ResNet-38
+* Gradient accumulate of 10
+* lr: 1e-5 (maybe try smaller or larger)
+* 100 epochs (1 epoch = 60 * 100 forwards, 60 * 10 backwards)
+* resize (0.6-1.0)/flip
+* feed out of order, each seq padded to 100, batch=1
+* Generate attention area with random size (dilate from 10-35)
+* Randomly shift attention area (by -5~+5 pixels in arbitrary direction)
+* More details, see the code
+* Result from 100 ep (maybe try other ep)
+  * Same hyper-params as before
+  * Use attention gt in testing, but introduced randomized attention (size, shift)
+  * Best Test on val set so far (fine-tune, 500 iters, lr=1e-6)
+    * Mean J: (0.84292, 0.86866)
+    * Mean F: (0.88229, 0.91311)
+  * Result without using attention gt
+    * Mean J: (0.58453)
+    * Mean F: (0.60906)
+    
  
 
 ## TODO

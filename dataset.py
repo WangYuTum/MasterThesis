@@ -178,10 +178,13 @@ class DAVIS_dataset():
         seg_obj = seg_obj.resize((new_W, new_H), Image.NEAREST)
         seg = np.array(seg_obj, seg.dtype)[..., np.newaxis] # [h, w, 1], np.uint8
 
-        # Generate attention area, size is randomized
+        # Generate attention area, size is randomized, plus randomized shift
         size_att = np.random.randint(9, 36)
+        shiftX_att = np.random.randint(-5, 6)
+        shiftY_att = np.random.randint(-5, 6)
         struct1 = generate_binary_structure(2, 2)
         att = binary_dilation(np.squeeze(seg), structure=struct1, iterations=size_att).astype(seg.dtype)
+        att = np.roll(att, (shiftX_att, shiftY_att), (0,1))
 
         # standardize
         img = img.astype(np.float32) * 1.0 / 255.0
