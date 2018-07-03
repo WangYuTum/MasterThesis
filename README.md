@@ -61,15 +61,12 @@ Train full-sized images (batch=4) seq by seq only using CNN part (including feat
 * Generate attention area with random size (dilate from 10-35)
 * Randomly shift attention area (by -5~+5 pixels in arbitrary direction)
 * More details, see the code
-* Result from 100 ep (maybe try other ep)
+* Result from 60 ep (maybe try other ep)
   * Same hyper-params as before
   * Use attention gt in testing, but introduced randomized attention (size, shift)
   * Best Test on val set so far (fine-tune, 500 iters, lr=1e-6)
-    * Mean J: (0.84292, 0.86866)
-    * Mean F: (0.88229, 0.91311)
-  * Result without using attention gt
-    * Mean J: (0.58453)
-    * Mean F: (0.60906)
+    * Mean J: 0.84097 (0.84292, 0.86866)
+    * Mean F: 0.8764 (0.88229, 0.91311)
     
  
 

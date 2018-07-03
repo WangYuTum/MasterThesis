@@ -288,7 +288,10 @@ class DAVIS_dataset():
         struct1 = generate_binary_structure(2, 2)
         # use var-sized attention area
         size_att = np.random.randint(9, 36)
+        shiftX_att = np.random.randint(-5, 6)
+        shiftY_att = np.random.randint(-5, 6)
         att = binary_dilation(np.squeeze(gt), structure=struct1, iterations=size_att).astype(gt.dtype)
+        att = np.roll(att, (shiftX_att, shiftY_att), (0, 1))
 
         gt = gt.astype(np.int32) # [h, w, 1], np.int32
         pair.append(gt)
@@ -329,7 +332,10 @@ class DAVIS_dataset():
             struct1 = generate_binary_structure(2, 2)
             # use var-sized attention area
             size_att = np.random.randint(9, 36)
-            att = binary_dilation(gt_bin, structure=struct1, iterations=size_att).astype(gt_bin.dtype)
+            shiftX_att = np.random.randint(-5, 6)
+            shiftY_att = np.random.randint(-5, 6)
+            att = binary_dilation(gt_bin, structure=struct1, iterations=30).astype(gt_bin.dtype)
+            att = np.roll(att, (shiftX_att, shiftY_att), (0, 1))
             att = att.astype(np.int32)[..., np.newaxis]  # [h, w, 1], np.int32
             frame_pair.append([frame_list[i], att])
 
