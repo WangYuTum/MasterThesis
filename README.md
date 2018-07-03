@@ -50,7 +50,7 @@ Train full-sized images (batch=4) seq by seq only using CNN part (including feat
     Varied sized attention area is okay; shifted attention area to be verified;
     Still need reasonably accurate attention area.
     
-## Training (include feat reduce) - No BN, random feed, gate img v3
+## Trained result (include feat reduce) - No BN, random feed, gate img v3
 * Weight init from ResNet-38 ILSVRC-ImageNet
 * Data mean/std from Implementation of ResNet-38
 * Gradient accumulate of 10
@@ -68,6 +68,19 @@ Train full-sized images (batch=4) seq by seq only using CNN part (including feat
     * Mean J: 0.84097 (0.84292, 0.86866)
     * Mean F: 0.8764 (0.88229, 0.91311)
     
+## Use inherit branch 'Attention_CNN-part-gate-img-v3' trained on 60ep to test optical flow attention
+* Result using attention gt (fine-tune 500 iters, lr=1e-6)
+    * Mean J: 0.84097
+    * Decay J: 0.058043
+    * Mean F: 0.8764
+* Result using segmentation mask t to generate attention mask t+1 (fine-tune 500 iters, lr=1e-6)
+    * Mean J: 
+    * Decay J:
+    * Mean F:
+* Result using optical flow t (raw value) to generate attention mask t+1 (fine-tune 500 iters, lr=1e-6)
+    * Mean J: 
+    * Decay J:
+    * Mean F:
  
 
 ## TODO
