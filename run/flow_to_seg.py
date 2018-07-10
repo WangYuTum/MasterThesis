@@ -6,6 +6,7 @@ import os
 import numpy as np
 import glob
 from PIL import Image
+import math
 from scipy.misc import imsave
 TAG_FLOAT = 202021.25
 
@@ -127,8 +128,16 @@ def generate_seg(seg_arr, flow_arr):
     for idx_h in range(h):
         for idx_w in range(w):
             if seg_arr[idx_h][idx_w] == 1:
-                motion_h = int(flow_arr[idx_h][idx_w][0])
-                motion_w = int(flow_arr[idx_h][idx_w][1])
+                # if flow_arr[idx_h][idx_w][0] >= 0:
+                #     motion_h = int(math.ceil(flow_arr[idx_h][idx_w][0]))
+                # else:
+                #     motion_h = int(math.floor(flow_arr[idx_h][idx_w][0]))
+                # if flow_arr[idx_h][idx_w][1] >= 0:
+                #     motion_w = int(math.ceil(flow_arr[idx_h][idx_w][1]))
+                # else:
+                #     motion_w = int(math.floor(flow_arr[idx_h][idx_w][1]))
+                motion_h = int(round(flow_arr[idx_h][idx_w][1]))
+                motion_w = int(round(flow_arr[idx_h][idx_w][0]))
                 new_h = idx_h + motion_h
                 new_w = idx_w + motion_w
                 if new_h < h and new_h >= 0 and new_w < w and new_w >= 0:
@@ -167,10 +176,8 @@ def main():
         flow_rgb_root = '../data/results/overlaid/flow_rgb/' + seq_paths[seq_idx].split('/')[-1]
         flow_to_seg_rgb_root = '../data/results/overlaid/flow-to-seg_rgb/' + seq_paths[seq_idx].split('/')[-1]
         primary_func(pair_data, flow_to_seg_rgb_root, flow_rgb_root, flow_to_seg_root)
-        break
     print('Job done.')
 
-    return 0
 
 if __name__ == '__main__':
     main()
