@@ -65,22 +65,23 @@ Train full-sized images (batch=4) seq by seq only using CNN part (including feat
   * Same hyper-params as before
   * Use attention gt in testing, but introduced randomized attention (size, shift)
   * Best Test on val set so far (fine-tune, 500 iters, lr=1e-6)
-    * Mean J: 0.84097 (0.84292, 0.86866)
-    * Mean F: 0.8764 (0.88229, 0.91311)
+    * Mean J: 0.85498 (0.84292, 0.86866)
+    * Decay J: 0.074299
+    * Mean F: 0.89206 (0.88229, 0.91311)
     
 ## Use inherit branch 'Attention_CNN-part-gate-img-v3' trained on 60ep to test optical flow attention
 * Result using attention gt (fine-tune 500 iters, lr=1e-6)
-    * Mean J: 0.84097
-    * Decay J: 0.058043
-    * Mean F: 0.8764
+    * Mean J: 0.85498
+    * Decay J: 0.074299
+    * Mean F: 0.89206
 * Result using segmentation mask t to generate attention mask t+1 (fine-tune 500 iters, lr=1e-6)
     * Mean J: 
     * Decay J:
     * Mean F:
 * Result using optical flow t (raw value) to generate attention mask t+1 (fine-tune 500 iters, lr=1e-6)
-    * Mean J: 
-    * Decay J:
-    * Mean F:
+    * Mean J: 0.65
+    * Decay J: 0.2985
+    * Mean F: 0.66591
  
 
 ## TODO
