@@ -133,19 +133,21 @@ with tf.Session(config=config_gpu) as sess:
     if FINE_TUNE == 1:
         print("Starting fine-tuning for {0}, {1} global steps.".format(val_seq_paths[FINE_TUNE_seq].split('/')[-1],
                                                                        global_iters))
-        feed_dict_v = {
-            feed_img: train_gt_weight[0][np.newaxis,:],
-            feed_one_shot_gt: train_gt_weight[1][np.newaxis,:],
-            feed_one_shot_weight: train_gt_weight[2][np.newaxis,:],
-            feed_one_shot_att: train_gt_weight[3][np.newaxis,:]
-        }
         for iter_step in range(global_iters):
+            feed_dict_v = {
+                feed_img: train_gt_weight[0][np.newaxis, :],
+                feed_one_shot_gt: train_gt_weight[1][np.newaxis, :],
+                feed_one_shot_weight: train_gt_weight[2][np.newaxis, :],
+                feed_one_shot_att: train_gt_weight[3][np.newaxis, :]
+            }
             # compute loss and acc grad
             run_result = sess.run([loss, sum_all] + grad_acc_op, feed_dict=feed_dict_v)
             loss_ = run_result[0]
             sum_all_ = run_result[1]
             # execute BP
             _ = sess.run(bp_step)
+            # Get the train_gt_weight for the 0-th frame, but with randomized size/shift
+            train_gt_weight = val_data.get_one_shot_pair()
 
             if global_step.eval() % summary_write_interval == 0:
                 sum_writer.add_summary(sum_all_, global_step.eval())

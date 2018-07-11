@@ -334,7 +334,7 @@ class DAVIS_dataset():
             size_att = np.random.randint(9, 36)
             shiftX_att = np.random.randint(-5, 6)
             shiftY_att = np.random.randint(-5, 6)
-            att = binary_dilation(gt_bin, structure=struct1, iterations=30).astype(gt_bin.dtype)
+            att = binary_dilation(gt_bin, structure=struct1, iterations=size_att).astype(gt_bin.dtype)
             att = np.roll(att, (shiftX_att, shiftY_att), (0, 1))
             att = att.astype(np.int32)[..., np.newaxis]  # [h, w, 1], np.int32
             frame_pair.append([frame_list[i], att])

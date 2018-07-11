@@ -65,8 +65,9 @@ Train full-sized images (batch=4) seq by seq only using CNN part (including feat
   * Same hyper-params as before
   * Use attention gt in testing, but introduced randomized attention (size, shift)
   * Best Test on val set so far (fine-tune, 500 iters, lr=1e-6)
-    * Mean J: 0.84097 (0.84292, 0.86866)
-    * Mean F: 0.8764 (0.88229, 0.91311)
+    * Mean J: 0.85498 (0.84292, 0.86866)
+    * Decay J: 0.074299
+    * Mean F: 0.89206 (0.88229, 0.91311)
     
  
 
