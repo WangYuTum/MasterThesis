@@ -50,7 +50,7 @@ Train full-sized images (batch=4) seq by seq only using CNN part (including feat
     Varied sized attention area is okay; shifted attention area to be verified;
     Still need reasonably accurate attention area.
     
-## Training (include feat reduce) - No BN, random feed, gate img v3
+## Trained result (include feat reduce) - No BN, random feed, gate img v3
 * Weight init from ResNet-38 ILSVRC-ImageNet
 * Data mean/std from Implementation of ResNet-38
 * Gradient accumulate of 10
