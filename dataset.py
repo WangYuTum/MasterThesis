@@ -30,12 +30,14 @@ from __future__ import print_function
 
 import numpy as np
 from PIL import Image
+from PIL import ImageFilter
 import sys
 import os
 import glob
 from scipy.ndimage.morphology import binary_dilation
 from scipy.ndimage import generate_binary_structure
 from scipy.misc import imsave
+from scipy.sparse import csr_matrix
 from skimage.transform import resize
 from scipy.misc import toimage
 from scipy.misc import imread
@@ -186,6 +188,22 @@ class DAVIS_dataset():
         att = binary_dilation(np.squeeze(seg), structure=struct1, iterations=size_att).astype(seg.dtype)
         att = np.roll(att, (shiftX_att, shiftY_att), (0,1))
 
+        # compute random shape variation through dilate boundary pixels
+        att_obj = Image.fromarray(att)
+        edge_obj = att_obj.filter(ImageFilter.FIND_EDGES)
+        rand_shape_arr = self.get_rand_att_from_edge(edge_obj, 5)
+
+        # compute small random false attention area (close by cases)
+        large_dilate = binary_dilation(att, structure=struct1, iterations=40).astype(att.dtype)
+        large_dilate_obj = Image.fromarray(large_dilate)
+        large_edge_obj = large_dilate_obj.filter(ImageFilter.FIND_EDGES)
+        false_att_arr = self.get_rand_att_from_edge(large_edge_obj, 3)
+
+        # fuse random shape variations and false attention, convert to binary again
+        att = att + rand_shape_arr + false_att_arr
+        att_bool = np.greater(att, 0)
+        att = att_bool.astype(np.uint8)
+
         # standardize
         img = img.astype(np.float32) * 1.0 / 255.0
         img -= data_mean
@@ -205,6 +223,31 @@ class DAVIS_dataset():
 
         return img, seg, weight, att
 
+    def get_rand_att_from_edge(self, edge_obj, num_edge_points_max):
+
+        edge_arr = np.array(edge_obj, np.uint8)
+        true_indices = np.nonzero(edge_arr)
+        num_rand_shape = np.random.randint(0, num_edge_points_max + 1)
+        num_true = true_indices[0].shape[0]
+        if num_true == 0:
+            return np.zeros(edge_arr.shape, np.uint8)
+        else:
+            rand_indices = np.random.choice(num_true, num_rand_shape)
+        if rand_indices.size != 0:
+            data = np.ones(rand_indices.size, np.uint8)
+            row_ind = []
+            col_ind = []
+            for idx in rand_indices:
+                row_ind.append(true_indices[0][idx])
+                col_ind.append(true_indices[1][idx])
+            sparse_mat = csr_matrix((data, (row_ind, col_ind)), shape=edge_arr.shape, dtype=np.uint8)
+            sparse_arr = sparse_mat.toarray().astype(np.uint8)
+            struct1 = generate_binary_structure(2, 2)
+            size_att = np.random.randint(9, 36)
+            rand_shape_arr = binary_dilation(sparse_arr, structure=struct1, iterations=size_att).astype(sparse_arr.dtype)
+            return rand_shape_arr
+        else:
+            return np.zeros(edge_arr.shape, np.uint8)
 
     def _get_val_data(self):
 
