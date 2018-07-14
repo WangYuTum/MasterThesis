@@ -24,11 +24,40 @@ Train full-sized images (batch=4) seq by seq only using CNN part (including feat
   * Best Test on val set so far (fine-tune, 500 iters, lr=1e-6)
     * Mean J: 0.70597
     * Mean F: 0.71415
+    
+## Training (include feat reduce) - No BN, random feed
+* Weight init from ResNet-38 ILSVRC-ImageNet
+* Data mean/std from Implementation of ResNet-38
+* Optimizer: Adam
+* Gradient accumulate of 10
+* lr (init 1e-6) piece-wise constant:
+    1e-6: 0-16 ep
+    1e-7: 16-24 ep
+    1e-6: 24-32 ep
+    1e-7: 32-40 ep
+    1e-6: 40-48 ep
+    1e-7: >48 ep
+    * OSVOS paper (init 1e-8):
+        step-size: 5 ep start from 10 ep
+* l2 weight decay: 0.0002; regularize only for conv kernels
+* 100 epochs (1 epoch = 60 * 100 forwards, 60 * 10 backwards)
+* resize (0.6-1.0)/flip
+* feed out of order, each seq padded to 100, batch=1
+* Supervison: No
+* More details, see the code
+
+
+
+## TO be fine-tuned:
+* learning rate
+* weight decay
+* optimizer
+* data mean/std which
+    
+    
  
 
-## TODO
-* Feed seq by seq without BN (major)
-* Side supervision (depends)
+
 
 ## Build Enviroment (no sudo privilege)
 * Ubuntu 16.04

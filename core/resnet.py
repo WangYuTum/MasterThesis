@@ -23,7 +23,7 @@ class ResNet():
         self._data_format = params.get('data_format', None)
         self._batch = params.get('batch', 1)
         self._l2_weight = params.get('l2_weight', 0.0002)
-        self._init_lr = params.get('init_lr', 1e-5)
+        self._lr = params.get('lr', 1e-5)
 
         if self._data_format is not "NCHW" and self._data_format is not "NHWC":
             sys.exit("Invalid data format. Must be either 'NCHW' or 'NHWC'.")
@@ -227,7 +227,8 @@ class ResNet():
         :return: a train op, a grad_acc_op
         '''
 
-        optimizer = tf.train.AdamOptimizer(self._init_lr)
+        optimizer = tf.train.AdamOptimizer(self._lr)
+        # optimizer = tf.train.MomentumOptimizer(self._lr, momentum=0.9)
         grads_vars = optimizer.compute_gradients(loss)
 
         # create grad accumulator for each variable-grad pair
@@ -276,6 +277,8 @@ class ResNet():
 
         l2_losses = []
         for var in tf.trainable_variables():
+            # only regularize conv kernels
+            #if str(var.name).split(':')[0].find('kernel') != -1:
             l2_losses.append(tf.nn.l2_loss(var))
         loss = tf.multiply(self._l2_weight, tf.add_n(l2_losses))
         tf.summary.scalar('l2_loss', loss)

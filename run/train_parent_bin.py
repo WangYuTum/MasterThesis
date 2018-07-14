@@ -33,7 +33,8 @@ with tf.device('/cpu:0'):
 params_model = {
     'batch': 1, # feed a random image at a time
     'l2_weight': 0.0002,
-    'init_lr': 1e-5, # original paper: 1e-8,
+    'init_lr': 1e-6, # original paper: 1e-8,
+    'lr': 1e-6, # later changed to piecewise constant
     'data_format': 'NCHW', # optimal for cudnn
     'save_path': '../data/ckpts/attention_bin/CNN-part-full-img/noBN/att_bin.ckpt',
     'tsboard_logs': '../data/tsboard_logs/attention_bin/CNN-part-full-img/noBN',
@@ -49,9 +50,14 @@ steps_per_ep = num_seq * steps_per_seq
 acc_count = 10 # accumulate 10 gradients
 total_steps = epochs * steps_per_ep # total steps of BP, 60000
 global_step = tf.Variable(0, name='global_step', trainable=False) # incremented automatically by 1 after 1 BP
-save_ckpt_interval = 12000 # corresponds to 20 epoch
+save_ckpt_interval = 6000 # corresponds to 10 epoch
 summary_write_interval = 50
 print_screen_interval = 20
+boundaries = [10000, 15000, 25000, 30000, 40000] # 10000 for 16 ep, 5000 for less than 10 ep
+values = [params_model['init_lr'], params_model['init_lr'] * 0.1, params_model['init_lr'],
+          params_model['init_lr'] * 0.1, params_model['init_lr'], params_model['init_lr'] * 0.1]
+learning_rate = tf.train.piecewise_constant(global_step, boundaries, values)
+params_model['lr'] = learning_rate
 
 # define placeholders
 feed_img = tf.placeholder(tf.float32, (params_model['batch'], None, None, 3))
