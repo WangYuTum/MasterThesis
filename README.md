@@ -69,7 +69,7 @@ Train full-sized images (batch=4) seq by seq only using CNN part (including feat
     * Decay J: 0.074299
     * Mean F: 0.89206 (0.88229, 0.91311)
 
-## Training (include feat reduce) - No BN, random feed, gate img v4
+## Trained result (include feat reduce) - No BN, random feed, gate img v4
 * Weight init from ResNet-38 ILSVRC-ImageNet
 * Data mean/std from Implementation of ResNet-38
 * Gradient accumulate of 10
@@ -82,21 +82,13 @@ Train full-sized images (batch=4) seq by seq only using CNN part (including feat
 * Randomly add variations to the attention shape
 * Randomly add false small attention area (close by cases)
 * More details, see the code
-* Result from 60 ep (maybe try other ep)
+* Result from 40 ep (maybe try other ep)
   * Same hyper-params as before
   * Use attention gt in testing, but introduced randomized attention (size, shift, shape-var, false-att)
   * Best Test on val set so far (fine-tune, 500 iters, lr=1e-6)
-    * Mean J:  (0.85498, 0.856)
-    * Decay J: (0.074299, 0.055)
-    * Mean F:  (0.89206, 0.875)
-  * Result using optical flow as attention guide:
-    * Mean J:
-    * Decay J:
-    * Mean F:
-  * Result using frame t as attention for frame t+1:
-    * Mean J:
-    * Decay J:
-    * Mean F:
+    * Mean J: 0.8447 (0.85498, 0.856)
+    * Decay J: 0.078719 (0.074299, 0.055)
+    * Mean F: 0.88514 (0.89206, 0.875)
  
 
 ## TODO
