@@ -69,7 +69,7 @@ Train full-sized images (batch=4) seq by seq only using CNN part (including feat
     * Decay J: 0.074299
     * Mean F: 0.89206 (0.88229, 0.91311)
 
-## Trained result (include feat reduce) - No BN, random feed, gate img v4
+## Trained result (include feat reduce) - No BN, random feed, gate img v4 - flow
 * Weight init from ResNet-38 ILSVRC-ImageNet
 * Data mean/std from Implementation of ResNet-38
 * Gradient accumulate of 10
@@ -89,7 +89,10 @@ Train full-sized images (batch=4) seq by seq only using CNN part (including feat
     * Mean J: 0.8447 (0.85498, 0.856)
     * Decay J: 0.078719 (0.074299, 0.055)
     * Mean F: 0.88514 (0.89206, 0.875)
- 
+  * Use optical flow as attention guide (fine-tune, 500 iters, 1000 iters)
+    * Mean J: 0.74504
+    * Decay J: 0.21986
+    * Mean F: 0.76569
 
 ## TODO
 * Feed seq by seq without BN (major)
