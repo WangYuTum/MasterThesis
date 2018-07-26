@@ -69,9 +69,9 @@ if FINE_TUNE == 1:
         'l2_weight': 0.0002,
         'init_lr': 1e-6, # original paper: 1e-8, can be further tuned
         'data_format': 'NCHW', # optimal for cudnn
-        'save_path': '../data/ckpts/fine-tune/attention_bin/CNN-part-gate-img-v4_large/80ep/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt',
-        'tsboard_logs': '../data/tsboard_logs/fine-tune/attention_bin/CNN-part-gate-img-v4_large/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1],
-        'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large/att_bin.ckpt-48000'
+        'save_path': '../data/ckpts/fine-tune/attention_bin/CNN-part-gate-img-v4_small/80ep/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt',
+        'tsboard_logs': '../data/tsboard_logs/fine-tune/attention_bin/CNN-part-gate-img-v4_small/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1],
+        'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_small/att_bin.ckpt-48000'
     }
     global_iters = 1000 # original paper: 500
     save_ckpt_interval = 100
@@ -84,7 +84,7 @@ else:
     params_model = {
         'batch': 1,
         'data_format': 'NCHW',  # optimal for cudnn
-        'restore_fine-tune_bin': '../data/ckpts/fine-tune/attention_bin/CNN-part-gate-img-v4_large/80ep/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt-48500',
+        'restore_fine-tune_bin': '../data/ckpts/fine-tune/attention_bin/CNN-part-gate-img-v4_small/80ep/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt-48500',
         'save_result_path': '../data/results/iter500/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]
     }
 
@@ -132,7 +132,11 @@ with tf.Session(config=config_gpu) as sess:
     if FINE_TUNE == 1:
         print("Starting fine-tuning for {0}, {1} global steps.".format(val_seq_paths[FINE_TUNE_seq].split('/')[-1],
                                                                        global_iters))
-        for iter_step in range(global_iters):
+        iter_i = 0
+        while iter_i < global_iters:
+            # if att is too small, resample again
+            if np.count_nonzero(train_gt_weight[3]) < 10:
+                continue
             feed_dict_v = {
                 feed_img: train_gt_weight[0][np.newaxis, :],
                 feed_one_shot_gt: train_gt_weight[1][np.newaxis, :],
@@ -158,6 +162,7 @@ with tf.Session(config=config_gpu) as sess:
                                      global_step=global_step,
                                      write_meta_graph=False)
                 print('Saved checkpoint at iter {}'.format(global_step.eval()))
+            iter_i = iter_i + 1
         print("Finished fine-tuning.")
 
     else:

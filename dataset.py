@@ -35,6 +35,7 @@ import sys
 import os
 import glob
 from scipy.ndimage.morphology import binary_dilation
+from scipy.ndimage.morphology import binary_erosion
 from scipy.ndimage import generate_binary_structure
 from scipy.misc import imsave
 from scipy.sparse import csr_matrix
@@ -186,20 +187,15 @@ class DAVIS_dataset():
         edge_obj = att_obj.filter(ImageFilter.FIND_EDGES)
         rand_shape_arr = self.get_rand_att_from_edge(edge_obj, 10, 40)
 
-        # compute small-large random false attention area (close to the object)
-        large_dilate = binary_dilation(att, structure=struct1, iterations=40).astype(att.dtype)
-        large_dilate_obj = Image.fromarray(large_dilate)
-        large_edge_obj = large_dilate_obj.filter(ImageFilter.FIND_EDGES)
-        false_att_arr_close = self.get_rand_att_from_edge(large_edge_obj, 10, 100)
+        # att with shape variations
+        att = att + rand_shape_arr
 
-        # compute small-large random false attention area (far from the object)
-        large_dilate2 = binary_dilation(att, structure=struct1, iterations=80).astype(att.dtype)
-        large_dilate_obj2 = Image.fromarray(large_dilate2)
-        large_edge_obj2 = large_dilate_obj2.filter(ImageFilter.FIND_EDGES)
-        false_att_arr_far = self.get_rand_att_from_edge(large_edge_obj2, 10, 100)
+        # shrink the att
+        shrink_size = np.random.randint(-1, 75)
+        shrinked_att = binary_erosion(att, structure=struct1, iterations=shrink_size).astype(att.dtype)
 
-        # fuse random shape variations and false attention, convert to binary again
-        att = att + rand_shape_arr + false_att_arr_close + false_att_arr_far
+        # convert to binary again
+        att = shrinked_att
         att_bool = np.greater(att, 0)
         att = att_bool.astype(np.uint8)
 
@@ -211,8 +207,10 @@ class DAVIS_dataset():
         att = att.astype(np.int32)[..., np.newaxis] # [h, w, 1], np.int32
 
         # get balance weight
-        weight = get_seg_balance_weight(seg, att) # [h,w,1], np.float32
-        # weight = get_att_balance_weight(seg) # [h,w,1]
+        if np.count_nonzero(att) == 0:
+            weight = np.array([0])
+        else:
+            weight = get_seg_balance_weight(seg, att) # [h,w,1], np.float32
 
         # reshape
         img = img[np.newaxis, ...]
@@ -340,20 +338,15 @@ class DAVIS_dataset():
         edge_obj = att_obj.filter(ImageFilter.FIND_EDGES)
         rand_shape_arr = self.get_rand_att_from_edge(edge_obj, 10, 40)
 
-        # compute small random false attention area (close to object)
-        large_dilate = binary_dilation(att, structure=struct1, iterations=40).astype(att.dtype)
-        large_dilate_obj = Image.fromarray(large_dilate)
-        large_edge_obj = large_dilate_obj.filter(ImageFilter.FIND_EDGES)
-        false_att_arr_close = self.get_rand_att_from_edge(large_edge_obj, 10, 100)
+        # att with shape variations
+        att = att + rand_shape_arr
 
-        # compute small-large random false attention area (far from the object)
-        large_dilate2 = binary_dilation(att, structure=struct1, iterations=80).astype(att.dtype)
-        large_dilate_obj2 = Image.fromarray(large_dilate2)
-        large_edge_obj2 = large_dilate_obj2.filter(ImageFilter.FIND_EDGES)
-        false_att_arr_far = self.get_rand_att_from_edge(large_edge_obj2, 10, 100)
+        # shrink the att
+        shrink_size = np.random.randint(-1, 75)
+        shrinked_att = binary_erosion(att, structure=struct1, iterations=shrink_size).astype(att.dtype)
 
         # fuse random shape variations and false attention, convert to binary again
-        att = att + rand_shape_arr + false_att_arr_close + false_att_arr_far
+        att = shrinked_att
         att_bool = np.greater(att, 0)
         att = att_bool.astype(np.uint8)
 
@@ -362,7 +355,13 @@ class DAVIS_dataset():
         att = att.astype(np.int32)[..., np.newaxis] # [h, w, 1], np.int32
 
         # get balance weight
-        weight = get_seg_balance_weight(gt, att) # [h,w,1], np.float32
+        # get balance weight
+        if np.count_nonzero(att) == 0:
+            weight = np.array([0])
+        else:
+            weight = get_seg_balance_weight(gt, att) # [h,w,1], np.float32
+
+        # weight = get_seg_balance_weight(gt, att) # [h,w,1], np.float32
         pair.append(weight)
         pair.append(att)
 
@@ -559,13 +558,25 @@ def get_seg_balance_weight(seg, att):
           compute balance weight within attention area.
     '''
 
+    # compute intersection over seg and att
+    inter_seg = np.multiply(seg, att)
+
+    # if att area is within seg area, no balance needed, set weight=1.0 does not affect loss
+    if np.array_equal(inter_seg, att):
+        mat_weight = np.ones_like(att, dtype=np.float32)
+        return mat_weight
+    # if att area not overlap with seg area, no balance needed, set weight=1.0 does not affect loss
+    if np.count_nonzero(inter_seg) == 0:
+        mat_weight = np.ones_like(att, dtype=np.float32)
+        return mat_weight
+
     num_total = np.sum(att)
-    num_pos = np.sum(seg)
+    num_pos = np.sum(inter_seg)
     num_neg = num_total - num_pos
     weight_pos = num_neg.astype(np.float32) / num_total.astype(np.float32)
     weight_neg = 1.0 - weight_pos
-    mat_pos = np.multiply(seg.astype(np.float32), weight_pos)
-    mat_neg = np.multiply(np.subtract(att, seg).astype(np.float32), weight_neg)
+    mat_pos = np.multiply(inter_seg.astype(np.float32), weight_pos)
+    mat_neg = np.multiply(np.subtract(att, inter_seg).astype(np.float32), weight_neg)
     mat_weight = np.add(mat_pos, mat_neg)
 
     return mat_weight
