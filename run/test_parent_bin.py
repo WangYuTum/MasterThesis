@@ -125,9 +125,9 @@ if FINE_TUNE == 1:
         'l2_weight': 0.0002,
         'init_lr': 1e-6, # original paper: 1e-8, can be further tuned
         'data_format': 'NCHW', # optimal for cudnn
-        'save_path': '/work/wangyu/CNN-part-gate-img-v4/40ep/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt',
-        'tsboard_logs': '../data/tsboard_logs/fine-tune/attention_bin/CNN-part-gate-img-v4/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1],
-        'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-gate-img-v4/att_bin.ckpt-24000'
+        'save_path': '/work/wangyu/CNN-part-gate-img-v5_40ep/40ep/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt',
+        'tsboard_logs': '../data/tsboard_logs/fine-tune/attention_bin/CNN-part-gate-img-v5_40ep/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1],
+        'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-gate-img-v5_40ep/att_bin.ckpt-24000'
     }
     global_iters = 1000 # original paper: 500
     save_ckpt_interval = 500
@@ -141,7 +141,7 @@ else:
         'batch': 1,
         'data_format': 'NCHW',  # optimal for cudnn
         #'restore_fine-tune_bin': '../data/ckpts/attention_bin/CNN-part-full-img/att_bin.ckpt-90000',
-        'restore_fine-tune_bin': '/work/wangyu/CNN-part-gate-img-v4/40ep/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt-24500',
+        'restore_fine-tune_bin': '/work/wangyu/CNN-part-gate-img-v5_40ep/40ep/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt-24500',
         'save_result_path': '../data/results/flow_att_seg/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]
     }
 
@@ -157,11 +157,12 @@ model = resnet.ResNet(params_model)
 if FINE_TUNE == 1:
     loss, bp_step, grad_acc_op = model.train(feed_img, feed_one_shot_gt,
                                              feed_one_shot_weight, feed_one_shot_att,
-                                             global_step, acc_count)
+                                             None, None,
+                                             global_step, acc_count, True)
     init_op = tf.global_variables_initializer()
     sum_all = tf.summary.merge_all()
     # define Saver
-    saver_fine_tune = tf.train.Saver()
+    saver_fine_tune = tf.train.Saver(allow_empty=True)
 else:
     prob_map, mask = model.test(feed_img, feed_att) # prob_map: [1,H,W] tf.float32, mask: [1,H,W] tf.int16
     init_op = tf.global_variables_initializer()

@@ -93,6 +93,17 @@ Train full-sized images (batch=4) seq by seq only using CNN part (including feat
     * Mean J: 0.74504
     * Decay J: 0.21986
     * Mean F: 0.76569
+    
+## Training (include feat reduce) - No BN, random feed, gate img v5
+* The CNN-part is the same as v4 (-flow); they are fixed
+* Add a small fully connected part to extract object descriptor to refine final segmentation
+* The goal is to improve over v4-flow
+* Need to train using GT_seg and noisy GT_seg
+* Init CNN-part from 40 ep (fixed), train only the added component
+* Results:
+  * Test on val with randomized gt attention as in v4
+  
+  * Test on val with flow-attention
 
 ## TODO
 * Feed seq by seq without BN (major)

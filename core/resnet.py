@@ -28,7 +28,7 @@ class ResNet():
         if self._data_format is not "NCHW" and self._data_format is not "NHWC":
             sys.exit("Invalid data format. Must be either 'NCHW' or 'NHWC'.")
 
-    def _build_model(self, images, atts):
+    def _build_model(self, images, atts, bb, bb_mask, train_cnn):
         '''
         :param images: [1,H,W,3], tf.float32
         :return: segmentation output before softmax
@@ -49,7 +49,7 @@ class ResNet():
         with tf.variable_scope('main'):
             # Residual Block B0
             with tf.variable_scope('B0'):
-                model['B0'] = nn.conv_layer(self._data_format, images, 1, 'SAME', shape_dict['B0'])
+                model['B0'] = nn.conv_layer(self._data_format, images, 1, 'SAME', shape_dict['B0'], train_cnn)
 
             # Pooling 1
             model['B0_pooled'] = nn.max_pool2d(self._data_format, model['B0'], 2, 'SAME')
@@ -59,11 +59,11 @@ class ResNet():
             shape_dict['B1']['side'] = [1, 1, 64, 128]
             shape_dict['B1']['convs'] = [[3, 3, 64, 128], [3, 3, 128, 128]]
             with tf.variable_scope('B1_0'):
-                model['B1_0'] = nn.res_side(self._data_format, model['B0_pooled'], shape_dict['B1'])
+                model['B1_0'] = nn.res_side(self._data_format, model['B0_pooled'], shape_dict['B1'], train_cnn)
             for i in range(2):
                 with tf.variable_scope('B1_' + str(i + 1)):
                     model['B1_' + str(i + 1)] = nn.res(self._data_format, model['B1_' + str(i)],
-                                                   shape_dict['B1']['convs'])
+                                                   shape_dict['B1']['convs'], train_cnn)
 
             # Pooling 2
             model['B1_2_pooled'] = nn.max_pool2d(self._data_format, model['B1_2'], 2, 'SAME')
@@ -73,11 +73,11 @@ class ResNet():
             shape_dict['B2']['side'] = [1, 1, 128, 256]
             shape_dict['B2']['convs'] = [[3, 3, 128, 256], [3, 3, 256, 256]]
             with tf.variable_scope('B2_0'):
-                model['B2_0'] = nn.res_side(self._data_format, model['B1_2_pooled'], shape_dict['B2'])
+                model['B2_0'] = nn.res_side(self._data_format, model['B1_2_pooled'], shape_dict['B2'], train_cnn)
             for i in range(2):
                 with tf.variable_scope('B2_' + str(i + 1)):
                     model['B2_' + str(i + 1)] = nn.res(self._data_format, model['B2_' + str(i)],
-                                                       shape_dict['B2']['convs'])
+                                                       shape_dict['B2']['convs'], train_cnn)
 
             # Pooling 3
             model['B2_2_pooled'] = nn.max_pool2d(self._data_format, model['B2_2'], 2, 'SAME')
@@ -87,11 +87,11 @@ class ResNet():
             shape_dict['B3']['side'] = [1, 1, 256, 512]
             shape_dict['B3']['convs'] = [[3, 3, 256, 512], [3, 3, 512, 512]]
             with tf.variable_scope('B3_0'):
-                model['B3_0'] = nn.res_side(self._data_format, model['B2_2_pooled'], shape_dict['B3'])
+                model['B3_0'] = nn.res_side(self._data_format, model['B2_2_pooled'], shape_dict['B3'], train_cnn)
             for i in range(5):
                 with tf.variable_scope('B3_' + str(i + 1)):
                     model['B3_' + str(i + 1)] = nn.res(self._data_format, model['B3_' + str(i)],
-                                                       shape_dict['B3']['convs'])
+                                                       shape_dict['B3']['convs'], train_cnn)
 
             # Pooling 4
             model['B3_5_pooled'] = nn.max_pool2d(self._data_format, model['B3_5'], 2, 'SAME')
@@ -101,20 +101,20 @@ class ResNet():
             shape_dict['B4_0']['side'] = [1, 1, 512, 1024]
             shape_dict['B4_0']['convs'] = [[3, 3, 512, 512],[3, 3, 512, 1024]]
             with tf.variable_scope('B4_0'):
-                model['B4_0'] = nn.res_side(self._data_format, model['B3_5_pooled'], shape_dict['B4_0'])
+                model['B4_0'] = nn.res_side(self._data_format, model['B3_5_pooled'], shape_dict['B4_0'], train_cnn)
             shape_dict['B4_23'] = [[3, 3, 1024, 512], [3, 3, 512, 1024]]
             for i in range(2):
                 with tf.variable_scope('B4_' + str(i + 1)):
                     model['B4_' + str(i + 1)] = nn.res(self._data_format, model['B4_' + str(i)],
-                                                       shape_dict['B4_23'])
+                                                       shape_dict['B4_23'], train_cnn)
 
             shape_dict['feat_reduce'] = [1,1,1024,128]
             with tf.variable_scope('feat_reduce'):
                 with tf.variable_scope('conv'):
                     model['feat_reduced'] = nn.conv_layer(self._data_format, model['B4_2'], 1, 'SAME',
-                                                        shape_dict['feat_reduce'])
+                                                        shape_dict['feat_reduce'], train_cnn)
                 with tf.variable_scope('bias'):
-                    model['feat_reduced'] = nn.bias_layer(self._data_format, model['feat_reduced'], 128)
+                    model['feat_reduced'] = nn.bias_layer(self._data_format, model['feat_reduced'], 128, train_cnn)
                 model['feat_reduced'] = nn.ReLu_layer(model['feat_reduced']) # [4,h,w,128] or [4,128,h,w]
 
                 # resize to fixed size
@@ -125,10 +125,71 @@ class ResNet():
                 else:
                     model['feat_resized'] = tf.image.resize_images(model['feat_reduced'], [30, 56]) # NHWC
 
+            ## The object descriptor branch, if not only train cnn part
+            if not train_cnn:
+                with tf.variable_scope('obj_desc'):
+                    with tf.variable_scope('B4_up'):
+                        side_b4 = nn.conv_layer(self._data_format, model['B4_2'], 1, 'SAME', [3, 3, 1024, 128], train_cnn)
+                        side_b4 = nn.bias_layer(self._data_format, side_b4, 128, train_cnn)
+                        if self._data_format == "NCHW":
+                            side_b4 = tf.transpose(side_b4, [0, 2, 3, 1])  # To NHWC
+                            side_b4_f = tf.image.resize_images(side_b4, [64, 128])  # NHWC
+                            side_b4_f = tf.transpose(side_b4_f, [0, 3, 1, 2])  # To NCHW
+                        else:
+                            side_16_f = tf.image.resize_images(side_b4, [64, 128])  # NHWC
+                    with tf.variable_scope('B5_up'):
+                        side_b5 = nn.conv_layer(self._data_format, model['feat_resized'], 1, 'SAME', [3, 3, 128, 128], train_cnn)
+                        side_b5 = nn.bias_layer(self._data_format, side_b5, 128, train_cnn)
+                        if self._data_format == "NCHW":
+                            side_b5 = tf.transpose(side_b5, [0, 2, 3, 1])  # To NHWC
+                            side_b5_f = tf.image.resize_images(side_b5, [64, 128])  # NHWC
+                            side_b5_f = tf.transpose(side_b5_f, [0, 3, 1, 2])  # To NCHW
+                        else:
+                            side_b5_f = tf.image.resize_images(side_b5, [64, 128])  # NHWC
+                    with tf.variable_scope('concat_fuse'):
+                        if self._data_format == "NCHW":
+                            concat_obj_feat = tf.concat([side_b4_f, side_b5_f], axis=1)
+                        else:
+                            concat_obj_feat = tf.concat([side_b4_f], axis=3)
+                        obj_feat = nn.conv_layer(self._data_format, concat_obj_feat, 1, 'SAME', [1, 1, 256, 256], train_cnn)
+                        obj_feat = nn.bias_layer(self._data_format, obj_feat, 256, train_cnn)
+                        obj_feat = nn.ReLu_layer(obj_feat)  # Add non-linearity, [N,64,128,256] or [N,256,64,128]
+                    ## mask the relevant features, bb=[offset_h, offset_w, target_h, target_w]
+                    ## bb_mask: [1, target_h, target_w, 1], tf.float32, zero-one tensor
+                    ## NOTE: bb might be empty due to small object, set to minimum 2x2 size
+                    if self._data_format == 'NCHW':
+                        obj_feat = tf.transpose(obj_feat, [0, 2, 3, 1])  # To NHWC
+                        masked_obj_feat = tf.image.crop_to_bounding_box(obj_feat, bb[0], bb[1], bb[2], bb[3])
+                        masked_obj_feat = tf.multiply(masked_obj_feat, bb_mask) # [1,h,w,256]
+                        masked_obj_feat = tf.image.resize_images(masked_obj_feat, [32, 32])  # NHWC
+                        masked_obj_feat = tf.transpose(masked_obj_feat, [0, 3, 1, 2])  # To NCHW
+                    else:
+                        masked_obj_feat = tf.image.crop_to_bounding_box(obj_feat, bb[0], bb[1], bb[2], bb[3])
+                        masked_obj_feat = tf.multiply(masked_obj_feat, bb_mask)  # [1,h,w,256]
+                        masked_obj_feat = tf.image.resize_images(masked_obj_feat, [32, 32])  # NHWC
+
+                    with tf.variable_scope('obj_feat_agg'):
+                        with tf.variable_scope('conv1'):
+                            obj_feat1 = nn.conv_layer(self._data_format, masked_obj_feat, 2, 'SAME', [3,3,256,256], train_cnn)
+                            obj_feat1 = nn.bias_layer(self._data_format, obj_feat1, 256, train_cnn)
+                            obj_feat1 = nn.ReLu_layer(obj_feat1) # [N,8,16,256] or [N,256,8,16]
+                        with tf.variable_scope('conv2'):
+                            obj_feat2 = nn.conv_layer(self._data_format, obj_feat1, 2, 'SAME', [3,3,256,256], train_cnn)
+                            obj_feat2 = nn.bias_layer(self._data_format, obj_feat2, 256, train_cnn)
+                            obj_feat2 = nn.ReLu_layer(obj_feat2) # [N,4,8,256] or [N,256,4,8]
+                        # flatten to a vector
+                        with tf.variable_scope('dense1'):
+                            obj_vec = tf.layers.flatten(obj_feat2, name='obj_feat2_flat') # [N, 4*8*256] = [N, 8192]
+                            dense_out1 = tf.layers.dense(obj_vec, 1024, activation=tf.nn.relu, use_bias=True) # [N,80]
+                            dense_drop = tf.layers.dropout(dense_out1, rate=0.4, training=True)
+                        with tf.variable_scope('dense2'):
+                            dense_out2 = tf.layers.dense(dense_drop, 80, activation=None, use_bias=True)
+
+
             # aggregate all feature on diff levels
             with tf.variable_scope('B1_side_path'):
-                side_2 = nn.conv_layer(self._data_format, model['B1_2'], 1, 'SAME', [3, 3, 128, 16])
-                side_2 = nn.bias_layer(self._data_format, side_2, 16)
+                side_2 = nn.conv_layer(self._data_format, model['B1_2'], 1, 'SAME', [3, 3, 128, 16], train_cnn)
+                side_2 = nn.bias_layer(self._data_format, side_2, 16, train_cnn)
                 if self._data_format == "NCHW":
                     side_2 = tf.transpose(side_2, [0,2,3,1]) # To NHWC
                     side_2_f = tf.image.resize_images(side_2, [im_size[1], im_size[2]]) # NHWC
@@ -136,8 +197,8 @@ class ResNet():
                 else:
                     side_2_f = tf.image.resize_images(side_2, [im_size[1], im_size[2]])  # NHWC
             with tf.variable_scope('B2_side_path'):
-                side_4 = nn.conv_layer(self._data_format, model['B2_2'], 1, 'SAME', [3, 3, 256, 16])
-                side_4 = nn.bias_layer(self._data_format, side_4, 16)
+                side_4 = nn.conv_layer(self._data_format, model['B2_2'], 1, 'SAME', [3, 3, 256, 16], train_cnn)
+                side_4 = nn.bias_layer(self._data_format, side_4, 16, train_cnn)
                 if self._data_format == "NCHW":
                     side_4 = tf.transpose(side_4, [0, 2, 3, 1])  # To NHWC
                     side_4_f = tf.image.resize_images(side_4, [im_size[1], im_size[2]]) # NHWC
@@ -145,8 +206,8 @@ class ResNet():
                 else:
                     side_4_f = tf.image.resize_images(side_4, [im_size[1], im_size[2]]) # NHWC
             with tf.variable_scope('B3_side_path'):
-                side_8 = nn.conv_layer(self._data_format, model['B3_5'], 1, 'SAME', [3, 3, 512, 16])
-                side_8 = nn.bias_layer(self._data_format, side_8, 16)
+                side_8 = nn.conv_layer(self._data_format, model['B3_5'], 1, 'SAME', [3, 3, 512, 16], train_cnn)
+                side_8 = nn.bias_layer(self._data_format, side_8, 16, train_cnn)
                 if self._data_format == "NCHW":
                     side_8 = tf.transpose(side_8, [0, 2, 3, 1])  # To NHWC
                     side_8_f = tf.image.resize_images(side_8, [im_size[1], im_size[2]]) # NHWC
@@ -154,8 +215,8 @@ class ResNet():
                 else:
                     side_8_f = tf.image.resize_images(side_8, [im_size[1], im_size[2]]) # NHWC
             with tf.variable_scope('B4_side_path'):
-                side_16 = nn.conv_layer(self._data_format, model['B4_2'], 1, 'SAME', [3, 3, 1024, 16])
-                side_16 = nn.bias_layer(self._data_format, side_16, 16)
+                side_16 = nn.conv_layer(self._data_format, model['B4_2'], 1, 'SAME', [3, 3, 1024, 16], train_cnn)
+                side_16 = nn.bias_layer(self._data_format, side_16, 16, train_cnn)
                 if self._data_format == "NCHW":
                     side_16 = tf.transpose(side_16, [0, 2, 3, 1])  # To NHWC
                     side_16_f = tf.image.resize_images(side_16, [im_size[1], im_size[2]]) # NHWC
@@ -163,8 +224,8 @@ class ResNet():
                 else:
                     side_16_f = tf.image.resize_images(side_16, [im_size[1], im_size[2]])  # NHWC
             with tf.variable_scope('resize_side_path'):
-                side_reduced = nn.conv_layer(self._data_format, model['feat_resized'], 1, 'SAME', [3, 3, 128, 16])
-                side_reduced = nn.bias_layer(self._data_format, side_reduced, 16)
+                side_reduced = nn.conv_layer(self._data_format, model['feat_resized'], 1, 'SAME', [3, 3, 128, 16], train_cnn)
+                side_reduced = nn.bias_layer(self._data_format, side_reduced, 16, train_cnn)
                 if self._data_format == "NCHW":
                     side_reduced = tf.transpose(side_reduced, [0, 2, 3, 1])  # To NHWC
                     side_reduced_f = tf.image.resize_images(side_reduced, [im_size[1], im_size[2]]) # NHWC
@@ -178,10 +239,25 @@ class ResNet():
             else:
                 concat_seg_feat = tf.concat([side_2_f, side_4_f, side_8_f, side_16_f, side_reduced_f], axis=3)
             with tf.variable_scope('fuse'):
-                seg_out = nn.conv_layer(self._data_format, concat_seg_feat, 1, 'SAME', [1, 1, 80, 2])
-                seg_out = nn.bias_layer(self._data_format, seg_out, 2)
+                seg_out = nn.conv_layer(self._data_format, concat_seg_feat, 1, 'SAME', [1, 1, 80, 2], train_cnn)
+                init_seg_out = nn.bias_layer(self._data_format, seg_out, 2, train_cnn)
 
-        return seg_out
+            ## Fuse multi-scale features with object descriptor, if not train only cnn part
+            if not train_cnn:
+                with tf.variable_scope('obj_fuse'):
+                    if self._data_format == "NCHW":
+                        fused_glob_seg = tf.transpose(concat_seg_feat, [0, 2, 3, 1])  # To NHWC
+                        fused_glob_seg = tf.multiply(fused_glob_seg, dense_out2)  # NHWC
+                        fused_glob_seg = tf.transpose(fused_glob_seg, [0, 3, 1, 2])  # To NCHW
+                    else:
+                        fused_glob_seg = tf.multiply(concat_seg_feat, dense_out2)
+                    fused_seg = nn.conv_layer(self._data_format, fused_glob_seg, 1, 'SAME', [1, 1, 80, 2], train_cnn)
+                    final_seg_out = nn.bias_layer(self._data_format, fused_seg, 2, train_cnn)
+                    final_out = final_seg_out
+            else:
+                final_out = init_seg_out
+
+        return final_out
 
     def _att_gate(self, images, atts):
         '''
@@ -212,18 +288,21 @@ class ResNet():
 
         return loss
 
-    def train(self, feed_img, feed_seg, feed_weight, feed_att, global_step, acc_count):
+    def train(self, feed_img, feed_seg, feed_weight, feed_att, bb, bb_mask, global_step, acc_count, train_cnn):
         '''
         :param feed_img: [1,H,W,3], tf.float32
         :param feed_seg: [1,H,W,1], tf.int32
         :param feed_weight: [1,H,W,1], tf.float32
         :param feed_att: [1,H,W,1], tf.int32
+        :param bb: a list containing [offset_h, offset_w, target_h, target_w], tf.int32
+        :param bb_mask: zero-one tensor [1,target_h, target_w, 1], tf.float32
         :param global_step: keep track of global train step
         :param acc_count: number of accumulated gradients
+        :param train_cnn: bool, train only cnn or train object descriptor
         :return: total_loss, train_step_op, grad_acc_op
         '''
 
-        seg_out = self._build_model(feed_img, feed_att) # seg_out shape: [1,H,W,2] or [1,2,H,W] with original input image size
+        seg_out = self._build_model(feed_img, feed_att, bb, bb_mask, train_cnn) # seg_out shape: [1,H,W,2] or [1,2,H,W] with original input image size
         total_loss = self._seg_loss(seg_out, feed_seg, feed_weight, feed_att) \
                      + self._l2_loss()
         tf.summary.scalar('total_loss', total_loss)
@@ -303,7 +382,9 @@ class ResNet():
 
         l2_losses = []
         for var in tf.trainable_variables():
-            l2_losses.append(tf.nn.l2_loss(var))
+            # do not regularize bias
+            if str(var.name).split(':')[0].find('bias') == -1:
+                l2_losses.append(tf.nn.l2_loss(var))
         loss = tf.multiply(self._l2_weight, tf.add_n(l2_losses))
         tf.summary.scalar('l2_loss', loss)
 

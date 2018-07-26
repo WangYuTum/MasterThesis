@@ -223,6 +223,35 @@ class DAVIS_dataset():
 
         return img, seg, weight, att
 
+    def get_bb_mask_img(self, seg, img):
+        '''
+        :param seg: [1,H,W,1] np.int32
+        :param img: [1,H,W,3] np.float32
+        :return:
+            bb [4] np.int32
+            bb_mask [1,h,w,1], zero-one tensor, h>=2, w>=2
+            bb_img: [1,h,w,3] np.float32
+        '''
+        seg_obj = Image.fromarray(np.squeeze(seg))
+        seg_small = seg_obj.resize((128,64), Image.NEAREST)
+        bb_params = seg_small.getbbox() # [w1,h1,w2,h2]
+        ## check if empty due to small obj size
+        if bb_params is None:
+            return 0,0,None
+        offset_h = bb_params[1]
+        offset_w = bb_params[0]
+        target_h = bb_params[3] - bb_params[1]
+        target_w = bb_params[2] - bb_params[0]
+        bb = [offset_h, offset_w, target_h, target_w] # [4], np.int
+        bb_mask_obj = seg_small.crop(bb_params) # [target_w, target_h]
+        bb_mask_arr = np.array(bb_mask_obj, np.int32)[np.newaxis, ..., np.newaxis] # [1, target_h, target_w, 1], np.int32
+        #img_obj = Image.fromarray(np.squeeze(img))
+        #img_obj_small = img_obj.resize((128, 64), Image.BILINEAR)
+        #img_obj_bb = img_obj_small.crop(bb_params) # [target_w, target_h, 3]
+        #img_bb_arr = np.array(img_obj_bb, np.float32)[np.newaxis, ...] # [1, target_h, target_w, 3], np.float32
+
+        return bb, bb_mask_arr, True
+
     def get_rand_att_from_edge(self, edge_obj, num_edge_points_max):
 
         edge_arr = np.array(edge_obj, np.uint8)
