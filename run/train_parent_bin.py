@@ -35,10 +35,10 @@ params_model = {
     'l2_weight': 0.0002,
     'init_lr': 1e-5, # original paper: 1e-8,
     'data_format': 'NCHW', # optimal for cudnn
-    'save_path': '../data/ckpts/attention_bin/CNN-part-gate-img-v4/att_bin.ckpt',
-    'tsboard_logs': '../data/tsboard_logs/attention_bin/CNN-part-gate-img-v4',
+    'save_path': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large/att_bin.ckpt',
+    'tsboard_logs': '../data/tsboard_logs/attention_bin/CNN-part-gate-img-v4_large',
     'restore_imgnet': '../data/ckpts/imgnet.ckpt', # restore model from where
-    'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-gate-img-v4/att_bin.ckpt-xxx'
+    'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large/att_bin.ckpt-xxx'
 }
 # define epochs
 epochs = 100
@@ -93,7 +93,7 @@ with tf.Session(config=config_gpu) as sess:
         for local_step in range(steps_per_ep):
             # accumulate gradients
             for _ in range(acc_count):
-                # choose an image randomly (randomly flip/resize)
+                # choose an image randomly (randomly pre-processing)
                 img, seg, weight, att = mydata.get_a_random_sample() # [1,h,w,3] float32, [1,h,w,1] int32, [1,h,w,1] float32
                 feed_dict_v = {feed_img: img, feed_seg: seg, feed_weight: weight, feed_att: att}
                 # forward

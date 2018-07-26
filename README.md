@@ -89,6 +89,12 @@ Train full-sized images (batch=4) seq by seq only using CNN part (including feat
     * Mean J: 0.8447 (0.85498, 0.856)
     * Decay J: 0.078719 (0.074299, 0.055)
     * Mean F: 0.88514 (0.89206, 0.875)
+    
+  * Same hyper-params as before
+  * Use large randomized att, results(fine-tune from 80ep, 500iters):
+  
+  * Same hyper-params as before
+  * Use small randomized att, results(fine-tune from 80ep, 500iters):
  
 
 ## TODO

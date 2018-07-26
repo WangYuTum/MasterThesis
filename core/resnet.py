@@ -108,23 +108,6 @@ class ResNet():
                     model['B4_' + str(i + 1)] = nn.res(self._data_format, model['B4_' + str(i)],
                                                        shape_dict['B4_23'])
 
-            shape_dict['feat_reduce'] = [1,1,1024,128]
-            with tf.variable_scope('feat_reduce'):
-                with tf.variable_scope('conv'):
-                    model['feat_reduced'] = nn.conv_layer(self._data_format, model['B4_2'], 1, 'SAME',
-                                                        shape_dict['feat_reduce'])
-                with tf.variable_scope('bias'):
-                    model['feat_reduced'] = nn.bias_layer(self._data_format, model['feat_reduced'], 128)
-                model['feat_reduced'] = nn.ReLu_layer(model['feat_reduced']) # [4,h,w,128] or [4,128,h,w]
-
-                # resize to fixed size
-                if self._data_format == "NCHW":
-                    model['feat_reduced'] = tf.transpose(model['feat_reduced'], [0,2,3,1]) # To NHWC
-                    model['feat_resized'] = tf.image.resize_images(model['feat_reduced'], [30, 56])
-                    model['feat_resized'] = tf.transpose(model['feat_resized'], [0,3,1,2])  # To NCHW
-                else:
-                    model['feat_resized'] = tf.image.resize_images(model['feat_reduced'], [30, 56]) # NHWC
-
             # aggregate all feature on diff levels
             with tf.variable_scope('B1_side_path'):
                 side_2 = nn.conv_layer(self._data_format, model['B1_2'], 1, 'SAME', [3, 3, 128, 16])
@@ -162,23 +145,14 @@ class ResNet():
                     side_16_f = tf.transpose(side_16_f, [0, 3, 1, 2])  # To NCHW
                 else:
                     side_16_f = tf.image.resize_images(side_16, [im_size[1], im_size[2]])  # NHWC
-            with tf.variable_scope('resize_side_path'):
-                side_reduced = nn.conv_layer(self._data_format, model['feat_resized'], 1, 'SAME', [3, 3, 128, 16])
-                side_reduced = nn.bias_layer(self._data_format, side_reduced, 16)
-                if self._data_format == "NCHW":
-                    side_reduced = tf.transpose(side_reduced, [0, 2, 3, 1])  # To NHWC
-                    side_reduced_f = tf.image.resize_images(side_reduced, [im_size[1], im_size[2]]) # NHWC
-                    side_reduced_f = tf.transpose(side_reduced_f, [0, 3, 1, 2])  # To NCHW
-                else:
-                    side_reduced_f = tf.image.resize_images(side_reduced, [im_size[1], im_size[2]])  # NHWC
 
             # concat and linearly fuse
             if self._data_format == "NCHW":
-                concat_seg_feat = tf.concat([side_2_f, side_4_f, side_8_f, side_16_f, side_reduced_f], axis=1)
+                concat_seg_feat = tf.concat([side_2_f, side_4_f, side_8_f, side_16_f], axis=1)
             else:
-                concat_seg_feat = tf.concat([side_2_f, side_4_f, side_8_f, side_16_f, side_reduced_f], axis=3)
+                concat_seg_feat = tf.concat([side_2_f, side_4_f, side_8_f, side_16_f], axis=3)
             with tf.variable_scope('fuse'):
-                seg_out = nn.conv_layer(self._data_format, concat_seg_feat, 1, 'SAME', [1, 1, 80, 2])
+                seg_out = nn.conv_layer(self._data_format, concat_seg_feat, 1, 'SAME', [1, 1, 64, 2])
                 seg_out = nn.bias_layer(self._data_format, seg_out, 2)
 
         return seg_out
@@ -303,7 +277,9 @@ class ResNet():
 
         l2_losses = []
         for var in tf.trainable_variables():
-            l2_losses.append(tf.nn.l2_loss(var))
+            # only regularize conv kernels
+            if str(var.name).split(':')[0].find('bias') == -1:
+                l2_losses.append(tf.nn.l2_loss(var))
         loss = tf.multiply(self._l2_weight, tf.add_n(l2_losses))
         tf.summary.scalar('l2_loss', loss)
 

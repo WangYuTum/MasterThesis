@@ -38,12 +38,7 @@ from scipy.ndimage.morphology import binary_dilation
 from scipy.ndimage import generate_binary_structure
 from scipy.misc import imsave
 from scipy.sparse import csr_matrix
-from skimage.transform import resize
-from scipy.misc import toimage
-from scipy.misc import imread
 
-# data_mean = np.array([115.195829334, 114.927476686, 107.725750308]).reshape((1,1,3))
-# data_std = np.array([64.5572961827, 63.0172054007, 67.0494050908]).reshape((1,1,3))
 data_mean = np.array([0.485, 0.456, 0.406]).reshape((1,1,3)).astype(np.float32) # the ILSVRC mean, in rgb
 data_std = np.array([0.229, 0.224, 0.225]).reshape((1,1,3)).astype(np.float32) # the ILSVRC std, in rgb
 
@@ -66,8 +61,6 @@ class DAVIS_dataset():
         self._max_val_len = 104
         self._min_val_len = 34
         self._avg_val_len = 67
-        # self._data_mean = np.array([115.195829334, 114.927476686, 107.725750308]).reshape((1,1,3))
-        # self._data_std = np.array([64.5572961827, 63.0172054007, 67.0494050908]).reshape((1,1,3))
 
         if self._mode is None:
             sys.exit('Must specify a mode.')
@@ -191,16 +184,22 @@ class DAVIS_dataset():
         # compute random shape variation through dilate boundary pixels
         att_obj = Image.fromarray(att)
         edge_obj = att_obj.filter(ImageFilter.FIND_EDGES)
-        rand_shape_arr = self.get_rand_att_from_edge(edge_obj, 5)
+        rand_shape_arr = self.get_rand_att_from_edge(edge_obj, 10, 40)
 
-        # compute small random false attention area (close by cases)
+        # compute small-large random false attention area (close to the object)
         large_dilate = binary_dilation(att, structure=struct1, iterations=40).astype(att.dtype)
         large_dilate_obj = Image.fromarray(large_dilate)
         large_edge_obj = large_dilate_obj.filter(ImageFilter.FIND_EDGES)
-        false_att_arr = self.get_rand_att_from_edge(large_edge_obj, 3)
+        false_att_arr_close = self.get_rand_att_from_edge(large_edge_obj, 10, 100)
+
+        # compute small-large random false attention area (far from the object)
+        large_dilate2 = binary_dilation(att, structure=struct1, iterations=80).astype(att.dtype)
+        large_dilate_obj2 = Image.fromarray(large_dilate2)
+        large_edge_obj2 = large_dilate_obj2.filter(ImageFilter.FIND_EDGES)
+        false_att_arr_far = self.get_rand_att_from_edge(large_edge_obj2, 10, 100)
 
         # fuse random shape variations and false attention, convert to binary again
-        att = att + rand_shape_arr + false_att_arr
+        att = att + rand_shape_arr + false_att_arr_close + false_att_arr_far
         att_bool = np.greater(att, 0)
         att = att_bool.astype(np.uint8)
 
@@ -223,7 +222,7 @@ class DAVIS_dataset():
 
         return img, seg, weight, att
 
-    def get_rand_att_from_edge(self, edge_obj, num_edge_points_max):
+    def get_rand_att_from_edge(self, edge_obj, num_edge_points_max, dilate_max):
 
         edge_arr = np.array(edge_obj, np.uint8)
         true_indices = np.nonzero(edge_arr)
@@ -243,7 +242,7 @@ class DAVIS_dataset():
             sparse_mat = csr_matrix((data, (row_ind, col_ind)), shape=edge_arr.shape, dtype=np.uint8)
             sparse_arr = sparse_mat.toarray().astype(np.uint8)
             struct1 = generate_binary_structure(2, 2)
-            size_att = np.random.randint(9, 36)
+            size_att = np.random.randint(9, dilate_max+1)
             rand_shape_arr = binary_dilation(sparse_arr, structure=struct1, iterations=size_att).astype(sparse_arr.dtype)
             return rand_shape_arr
         else:
@@ -339,16 +338,22 @@ class DAVIS_dataset():
         # compute random shape variation through dilate boundary pixels
         att_obj = Image.fromarray(att)
         edge_obj = att_obj.filter(ImageFilter.FIND_EDGES)
-        rand_shape_arr = self.get_rand_att_from_edge(edge_obj, 5)
+        rand_shape_arr = self.get_rand_att_from_edge(edge_obj, 10, 40)
 
-        # compute small random false attention area (close by cases)
+        # compute small random false attention area (close to object)
         large_dilate = binary_dilation(att, structure=struct1, iterations=40).astype(att.dtype)
         large_dilate_obj = Image.fromarray(large_dilate)
         large_edge_obj = large_dilate_obj.filter(ImageFilter.FIND_EDGES)
-        false_att_arr = self.get_rand_att_from_edge(large_edge_obj, 3)
+        false_att_arr_close = self.get_rand_att_from_edge(large_edge_obj, 10, 100)
+
+        # compute small-large random false attention area (far from the object)
+        large_dilate2 = binary_dilation(att, structure=struct1, iterations=80).astype(att.dtype)
+        large_dilate_obj2 = Image.fromarray(large_dilate2)
+        large_edge_obj2 = large_dilate_obj2.filter(ImageFilter.FIND_EDGES)
+        false_att_arr_far = self.get_rand_att_from_edge(large_edge_obj2, 10, 100)
 
         # fuse random shape variations and false attention, convert to binary again
-        att = att + rand_shape_arr + false_att_arr
+        att = att + rand_shape_arr + false_att_arr_close + false_att_arr_far
         att_bool = np.greater(att, 0)
         att = att_bool.astype(np.uint8)
 
