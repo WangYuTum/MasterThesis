@@ -403,14 +403,22 @@ class DAVIS_dataset():
             # compute random shape variation through dilate boundary pixels
             att_obj = Image.fromarray(att)
             edge_obj = att_obj.filter(ImageFilter.FIND_EDGES)
-            rand_shape_arr = self.get_rand_att_from_edge(edge_obj, 5)
-            # compute small random false attention area (close by cases)
+            rand_shape_arr = self.get_rand_att_from_edge(edge_obj, 10, 40)
+            # compute small random false attention area (close to object)
             large_dilate = binary_dilation(att, structure=struct1, iterations=40).astype(att.dtype)
             large_dilate_obj = Image.fromarray(large_dilate)
             large_edge_obj = large_dilate_obj.filter(ImageFilter.FIND_EDGES)
-            false_att_arr = self.get_rand_att_from_edge(large_edge_obj, 3)
+            false_att_arr_close = self.get_rand_att_from_edge(large_edge_obj, 10, 100)
+
+            # compute small-large random false attention area (far from the object)
+            large_dilate2 = binary_dilation(att, structure=struct1, iterations=80).astype(att.dtype)
+            large_dilate_obj2 = Image.fromarray(large_dilate2)
+            large_edge_obj2 = large_dilate_obj2.filter(ImageFilter.FIND_EDGES)
+            false_att_arr_far = self.get_rand_att_from_edge(large_edge_obj2, 10, 100)
+
+
             # fuse random shape variations and false attention, convert to binary again
-            att = att + rand_shape_arr + false_att_arr
+            att = att + rand_shape_arr + false_att_arr_close + false_att_arr_far
             att_bool = np.greater(att, 0)
             att = att_bool.astype(np.uint8)
 

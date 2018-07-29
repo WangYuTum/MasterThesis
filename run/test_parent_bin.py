@@ -84,8 +84,8 @@ else:
     params_model = {
         'batch': 1,
         'data_format': 'NCHW',  # optimal for cudnn
-        'restore_fine-tune_bin': '../data/ckpts/fine-tune/attention_bin/CNN-part-gate-img-v4_large/80ep/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt-48500',
-        'save_result_path': '../data/results/iter500/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]
+        'restore_fine-tune_bin': '../data/ckpts/fine-tune/attention_bin/CNN-part-gate-img-v4_large/80ep/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt-48700',
+        'save_result_path': '../data/results/iter1000/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]
     }
 
 # display on tsboard only during fine-tuning
@@ -104,7 +104,7 @@ if FINE_TUNE == 1:
     init_op = tf.global_variables_initializer()
     sum_all = tf.summary.merge_all()
     # define Saver
-    saver_fine_tune = tf.train.Saver()
+    saver_fine_tune = tf.train.Saver(max_to_keep=11)
 else:
     prob_map, mask = model.test(feed_img, feed_att) # prob_map: [1,H,W] tf.float32, mask: [1,H,W] tf.int16
     init_op = tf.global_variables_initializer()
