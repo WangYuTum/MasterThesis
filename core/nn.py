@@ -227,6 +227,37 @@ def get_main_cnn_var():
 
     return imgnet_dict
 
+def get_obj_var():
+
+    imgnet_dict = {}
+
+    with tf.variable_scope('main/obj_desc/B4_up', reuse=True):
+        imgnet_dict['main/obj_desc/B4_up/kernel'] = tf.get_variable('kernel')
+        imgnet_dict['main/obj_desc/B4_up/bias'] = tf.get_variable('bias')
+    with tf.variable_scope('main/obj_desc/B5_up', reuse=True):
+        imgnet_dict['main/obj_desc/B5_up/kernel'] = tf.get_variable('kernel')
+        imgnet_dict['main/obj_desc/B5_up/bias'] = tf.get_variable('bias')
+    with tf.variable_scope('main/obj_desc/concat_fuse', reuse=True):
+        imgnet_dict['main/obj_desc/concat_fuse/kernel'] = tf.get_variable('kernel')
+        imgnet_dict['main/obj_desc/concat_fuse/bias'] = tf.get_variable('bias')
+    with tf.variable_scope('main/obj_desc/obj_feat_agg/conv1', reuse=True):
+        imgnet_dict['main/obj_desc/obj_feat_agg/conv1/kernel'] = tf.get_variable('kernel')
+        imgnet_dict['main/obj_desc/obj_feat_agg/conv1/bias'] = tf.get_variable('bias')
+    with tf.variable_scope('main/obj_desc/obj_feat_agg/conv2', reuse=True):
+        imgnet_dict['main/obj_desc/obj_feat_agg/conv2/kernel'] = tf.get_variable('kernel')
+        imgnet_dict['main/obj_desc/obj_feat_agg/conv2/bias'] = tf.get_variable('bias')
+    with tf.variable_scope('main/obj_desc/obj_feat_agg/dense1/dense', reuse=True):
+        imgnet_dict['main/obj_desc/obj_feat_agg/dense1/dense/kernel'] = tf.get_variable('kernel')
+        imgnet_dict['main/obj_desc/obj_feat_agg/dense1/dense/bias'] = tf.get_variable('bias')
+    with tf.variable_scope('main/obj_desc/obj_feat_agg/dense2/dense', reuse=True):
+        imgnet_dict['main/obj_desc/obj_feat_agg/dense2/dense/kernel'] = tf.get_variable('kernel')
+        imgnet_dict['main/obj_desc/obj_feat_agg/dense2/dense/bias'] = tf.get_variable('bias')
+    with tf.variable_scope('main/obj_fuse', reuse=True):
+        imgnet_dict['main/obj_fuse/kernel'] = tf.get_variable('kernel')
+        imgnet_dict['main/obj_fuse/bias'] = tf.get_variable('bias')
+
+    return imgnet_dict
+
 def param_lr():
     '''
     Set relative learning rate for different layers. The final lr is the global lr multiplied by the relative rate.

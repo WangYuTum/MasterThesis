@@ -101,7 +101,7 @@ with tf.Session(config=config_gpu) as sess:
             while acc_i < acc_count:
                 # choose an image randomly (randomly flip/resize)
                 img, seg, weight, att = mydata.get_a_random_sample() # [1,h,w,3] float32, [1,h,w,1] int32, [1,h,w,1] float32
-                bb, bb_mask, v_flag = mydata.get_bb_mask_img(seg, img)
+                bb, bb_mask, v_flag = mydata.get_bb_mask_img(seg)
                 if v_flag is None:
                     continue
                 feed_dict_v = {feed_img: img, feed_seg: seg, feed_weight: weight, feed_att: att,

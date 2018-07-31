@@ -26,8 +26,7 @@ params = [(1,1), (0,1),
 
 len_all = len(params)
 for i in range(len_all):
-    if i == 1:
-        break
     arg0 = str(params[i][0])
     arg1 = str(params[i][1])
-    call(['python', 'test_parent_bin.py', arg0, arg1])
+    if i % 2 != 0:
+        call(['python', 'test_parent_bin.py', arg0, arg1])
