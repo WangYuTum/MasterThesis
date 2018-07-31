@@ -13,6 +13,8 @@ from PIL import Image
 from scipy.misc import imsave
 from scipy.ndimage.morphology import binary_dilation
 from scipy.ndimage import generate_binary_structure
+from core.nn import get_main_cnn_var
+from core.nn import get_obj_var
 TAG_FLOAT = 202021.25
 
 
@@ -141,7 +143,8 @@ else:
         'batch': 1,
         'data_format': 'NCHW',  # optimal for cudnn
         #'restore_fine-tune_bin': '../data/ckpts/attention_bin/CNN-part-full-img/att_bin.ckpt-90000',
-        'restore_fine-tune_bin': '/work/wangyu/CNN-part-gate-img-v5_40ep/40ep/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt-24500',
+        'restore_fine-tune-cnn_bin': '../data/ckpts/fine-tune/attention_bin/CNN-part-gate-img-v4/40ep/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt-24500',
+        'restore_obj_bin': '../data/ckpts/attention_bin/CNN-part-gate-img-v5_40ep/att_bin.ckpt-60000',
         'save_result_path': '../data/results/flow_att_seg/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]
     }
 
@@ -158,17 +161,21 @@ if FINE_TUNE == 1:
     loss, bp_step, grad_acc_op = model.train(feed_img, feed_one_shot_gt,
                                              feed_one_shot_weight, feed_one_shot_att,
                                              None, None,
-                                             global_step, acc_count, True)
+                                             global_step, acc_count, False)
     init_op = tf.global_variables_initializer()
     sum_all = tf.summary.merge_all()
     # define Saver
     saver_fine_tune = tf.train.Saver(allow_empty=True)
 else:
-    prob_map, mask = model.test(feed_img, feed_att) # prob_map: [1,H,W] tf.float32, mask: [1,H,W] tf.int16
+    feed_bb = tf.placeholder(tf.int32, (4))
+    feed_bb_mask = tf.placeholder(tf.float32, (params_model['batch'], None, None, 1))
+
+    prob_map0, mask0, prob_map1, mask1 = model.test(feed_img, feed_att, feed_bb, feed_bb_mask, False) # prob_map: [1,H,W] tf.float32, mask: [1,H,W] tf.int16
     init_op = tf.global_variables_initializer()
     sum_all = tf.summary.merge_all()
     # define Saver
-    saver_test = tf.train.Saver()
+    saver_test_cnn = tf.train.Saver(var_list=get_main_cnn_var())
+    saver_test_obj = tf.train.Saver(var_list=get_obj_var())
 
 # run session
 with tf.Session(config=config_gpu) as sess:
@@ -181,8 +188,10 @@ with tf.Session(config=config_gpu) as sess:
         saver_fine_tune.restore(sess, params_model['restore_parent_bin'])
         print('restored variables from {}'.format(params_model['restore_parent_bin']))
     else:
-        saver_test.restore(sess, params_model['restore_fine-tune_bin'])
-        print('restored variables from {}'.format(params_model['restore_fine-tune_bin']))
+        saver_test_cnn.restore(sess, params_model['restore_fine-tune-cnn_bin'])
+        print('restored variables from {}'.format(params_model['restore_fine-tune-cnn_bin']))
+        saver_test_obj.restore(sess, params_model['restore_obj_bin'])
+        print('restored variables from {}'.format(params_model['restore_obj_bin']))
     # set deconv filters
     print('All weights initialized.')
 
@@ -240,35 +249,42 @@ with tf.Session(config=config_gpu) as sess:
         ###
         for test_idx in range(len(test_frames)):
             print("Inference on frame {}".format(test_idx+1))
-            ### Save attention area on current image
             rgb_obj = Image.open(img_files[test_idx+1])
             att_rgb = overlay_seg_rgb(att_flow, rgb_obj)
             att_rgb_save_name = str(test_idx+1).zfill(5) + '.png'
             att_rgb_save_path = att_rgb_overlay_path + '/' + att_rgb_save_name
             att_rgb.save(att_rgb_save_path)
-            ###
+            ### The 1st forward pass, run to produce init mask
             feed_dict_v = {feed_img: test_frames[test_idx][0][np.newaxis,:],
                            feed_att: att_flow[np.newaxis,...,np.newaxis]}
-            # prob_map: [1,H,W] tf.float32, mask: [1,H,W] tf.int16
-            prob_map_, mask_ = sess.run([prob_map, mask], feed_dict=feed_dict_v)
+            prob_map_0, mask_0 = sess.run([prob_map0, mask0], feed_dict=feed_dict_v)
+            save_name = str(test_idx + 1).zfill(5) + '.png'
+            save_path = params_model['save_result_path'] + '/init_mask/' + save_name
+            init_seg = np.multiply(np.squeeze(att_flow), np.squeeze(mask_0))
+            #imsave(save_path, init_seg)
+            ### 1st forward pass end
+            ### The 2nd forward pass, run to produce final mask and next attention
+            bb, bb_mask, v_flag = val_data.get_bb_mask_img(init_seg)
+            if v_flag is False:
+                #TODO: if the seg is all zeros, compute next attention based on init_seg and move to next frame
+                continue
+            feed_dict_v = {feed_img: test_frames[test_idx][0][np.newaxis,:],
+                           feed_att: att_flow[np.newaxis,...,np.newaxis],
+                           feed_bb: bb,
+                           feed_bb_mask: bb_mask}
+            prob_map_1, mask_1 = sess.run([prob_map1, mask1], feed_dict=feed_dict_v)
             save_name = str(test_idx+1).zfill(5) + '.png'
             save_path = params_model['save_result_path'] + '/' + save_name
-            # save binary mask
-            final_seg = np.multiply(np.squeeze(att_flow), np.squeeze(mask_))
+            final_seg = np.multiply(np.squeeze(att_flow), np.squeeze(mask_1))
             imsave(save_path, final_seg)
-            ### Save seg overlay rgb
             save_seg_rgb_path = seg_overlay_path + '/' + save_name
             seg_rgb = overlay_seg_rgb(final_seg, rgb_obj)
             seg_rgb.save(save_seg_rgb_path)
-            ###
-            ### Get next attention
             if test_idx != len(test_frames) - 1:
                 flow_arr = read_flow(flow_files[test_idx + 1])
                 new_seg = transf_slow(final_seg, flow_arr)
                 att_flow = binary_dilation(new_seg, structure=struct1, iterations=30).astype(new_seg.dtype)
-            ###
-            # save prob map
-            # imsave(save_path.replace('.png', '_prob.png'), np.squeeze(prob_map_))
+            ### 2nd forward pass end
             print("Saved result.")
         print("Finished inference.")
 
