@@ -136,7 +136,7 @@ class ResNet():
                             side_b4_f = tf.image.resize_images(side_b4, [64, 128])  # NHWC
                             side_b4_f = tf.transpose(side_b4_f, [0, 3, 1, 2])  # To NCHW
                         else:
-                            side_16_f = tf.image.resize_images(side_b4, [64, 128])  # NHWC
+                            side_b4_f = tf.image.resize_images(side_b4, [64, 128])  # NHWC
                     with tf.variable_scope('B5_up'):
                         side_b5 = nn.conv_layer(self._data_format, model['feat_resized'], 1, 'SAME', [3, 3, 128, 128], train_cnn)
                         side_b5 = nn.bias_layer(self._data_format, side_b5, 128, train_cnn)
@@ -181,7 +181,7 @@ class ResNet():
                         with tf.variable_scope('dense1'):
                             obj_vec = tf.layers.flatten(obj_feat2, name='obj_feat2_flat') # [N, 4*8*256] = [N, 8192]
                             dense_out1 = tf.layers.dense(obj_vec, 1024, activation=tf.nn.relu, use_bias=True) # [N,80]
-                            dense_drop = tf.layers.dropout(dense_out1, rate=0.4, training=True)
+                            dense_drop = tf.layers.dropout(dense_out1, rate=0.4, training=False)
                         with tf.variable_scope('dense2'):
                             dense_out2 = tf.layers.dense(dense_drop, 80, activation=None, use_bias=True)
 
@@ -257,7 +257,7 @@ class ResNet():
             else:
                 final_out = init_seg_out
 
-        return final_out
+        return init_seg_out, final_out
 
     def _att_gate(self, images, atts):
         '''
@@ -390,15 +390,21 @@ class ResNet():
 
         return loss
 
-    def test(self, images, atts):
+    def test(self, images, atts, bb, bb_mask, train=False):
         '''
         :param images: batchs/single image have shape [batch, H, W, 3]
         :return: probability map, binary mask
         '''
-        net_out = self._build_model(images, atts) # [batch, 2, H, W] or [batch, H, W, 2]
-        if self._data_format == "NCHW":
-            net_out = tf.transpose(net_out, [0, 2, 3, 1])
-        prob_map = tf.nn.softmax(net_out) # [batch, H, W, 2]
-        pred_mask = tf.argmax(prob_map, axis=3, output_type=tf.int32)  # [batch, H, W]
 
-        return prob_map[:,:,:,1:], pred_mask
+        init_out, final_out = self._build_model(images, atts, bb, bb_mask, train) # [batch, 2, H, W] or [batch, H, W, 2]
+        if self._data_format == "NCHW":
+            init_out = tf.transpose(init_out, [0, 2, 3, 1])
+            final_out = tf.transpose(final_out, [0, 2, 3, 1])
+
+        prob_map0 = tf.nn.softmax(init_out) # [batch, H, W, 2]
+        pred_mask0 = tf.argmax(prob_map0, axis=3, output_type=tf.int32)  # [batch, H, W]
+
+        prob_map1 = tf.nn.softmax(final_out) # [batch, H, W, 2]
+        pred_mask1 = tf.argmax(prob_map1, axis=3, output_type=tf.int32)  # [batch, H, W]
+
+        return prob_map0[:,:,:,1:], pred_mask0, prob_map1, pred_mask1

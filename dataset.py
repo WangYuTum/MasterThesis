@@ -223,7 +223,7 @@ class DAVIS_dataset():
 
         return img, seg, weight, att
 
-    def get_bb_mask_img(self, seg, img):
+    def get_bb_mask_img(self, seg):
         '''
         :param seg: [1,H,W,1] np.int32
         :param img: [1,H,W,3] np.float32
