@@ -15,9 +15,10 @@ sys.path.append("..")
 from dataset import DAVIS_dataset
 from core import resnet
 from core.nn import get_imgnet_var
+import numpy as np
 
 # config device
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 config_gpu = tf.ConfigProto()
 config_gpu.gpu_options.allow_growth = True
 
@@ -35,10 +36,10 @@ params_model = {
     'l2_weight': 0.0002,
     'init_lr': 1e-5, # original paper: 1e-8,
     'data_format': 'NCHW', # optimal for cudnn
-    'save_path': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large/att_bin.ckpt',
-    'tsboard_logs': '../data/tsboard_logs/attention_bin/CNN-part-gate-img-v4_large',
+    'save_path': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_small/att_bin.ckpt',
+    'tsboard_logs': '../data/tsboard_logs/attention_bin/CNN-part-gate-img-v4_small',
     'restore_imgnet': '../data/ckpts/imgnet.ckpt', # restore model from where
-    'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large/att_bin.ckpt-xxx'
+    'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_small/att_bin.ckpt-xxx'
 }
 # define epochs
 epochs = 100
@@ -92,14 +93,18 @@ with tf.Session(config=config_gpu) as sess:
         # train steps for each epoch
         for local_step in range(steps_per_ep):
             # accumulate gradients
-            for _ in range(acc_count):
+            acc_i = 0
+            while acc_i < acc_count:
                 # choose an image randomly (randomly pre-processing)
                 img, seg, weight, att = mydata.get_a_random_sample() # [1,h,w,3] float32, [1,h,w,1] int32, [1,h,w,1] float32
+                if np.count_nonzero(att) < 10:
+                    continue
                 feed_dict_v = {feed_img: img, feed_seg: seg, feed_weight: weight, feed_att: att}
                 # forward
                 run_result = sess.run([loss, sum_all]+grad_acc_op, feed_dict=feed_dict_v)
                 loss_ = run_result[0]
                 sum_all_ = run_result[1]
+                acc_i = acc_i + 1
             # BP, increment global_step by 1 automatically
             sess.run(bp_step)
             # save summary

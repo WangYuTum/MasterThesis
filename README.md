@@ -95,9 +95,12 @@ Train full-sized images (batch=4) seq by seq only using CNN part (including feat
   
   * Same hyper-params as before
   * Use small randomized att, results(fine-tune from 80ep, 500iters):
+  
+  * TODO: set proper randomized att for testing frames for both large/small att pattern
  
 
 ## TODO
+* Train full image, then train gated image
 * Feed seq by seq without BN (major)
 * Side supervision (depends)
 
