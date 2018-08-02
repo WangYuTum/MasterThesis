@@ -342,7 +342,7 @@ class DAVIS_dataset():
         att = att + rand_shape_arr
 
         # shrink the att
-        shrink_size = np.random.randint(-1, 75)
+        shrink_size = np.random.randint(1, 25)
         shrinked_att = binary_erosion(att, structure=struct1, iterations=shrink_size).astype(att.dtype)
 
         # fuse random shape variations and false attention, convert to binary again
@@ -402,12 +402,12 @@ class DAVIS_dataset():
             # compute random shape variation through dilate boundary pixels
             att_obj = Image.fromarray(att)
             edge_obj = att_obj.filter(ImageFilter.FIND_EDGES)
-            rand_shape_arr = self.get_rand_att_from_edge(edge_obj, 5)
+            rand_shape_arr = self.get_rand_att_from_edge(edge_obj, 10, 40)
             # compute small random false attention area (close by cases)
             large_dilate = binary_dilation(att, structure=struct1, iterations=40).astype(att.dtype)
             large_dilate_obj = Image.fromarray(large_dilate)
             large_edge_obj = large_dilate_obj.filter(ImageFilter.FIND_EDGES)
-            false_att_arr = self.get_rand_att_from_edge(large_edge_obj, 3)
+            false_att_arr = self.get_rand_att_from_edge(large_edge_obj, 10, 40)
             # fuse random shape variations and false attention, convert to binary again
             att = att + rand_shape_arr + false_att_arr
             att_bool = np.greater(att, 0)
