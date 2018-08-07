@@ -122,9 +122,9 @@ if FINE_TUNE == 1:
         'l2_weight': 0.0002,
         'init_lr': 1e-6, # original paper: 1e-8, can be further tuned
         'data_format': 'NCHW', # optimal for cudnn
-        'save_path': '../data/ckpts/fine-tune/attention_bin/CNN-part-gate-img-v4_large/80ep/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt',
+        'save_path': '../data/ckpts/fine-tune/attention_bin/CNN-part-gate-img-v4_large/40ep/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt',
         'tsboard_logs': '../data/tsboard_logs/fine-tune/attention_bin/CNN-part-gate-img-v4_large/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1],
-        'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large/att_bin.ckpt-48000'
+        'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large/att_bin.ckpt-24000'
     }
     global_iters = 1000 # original paper: 500
     save_ckpt_interval = [24300, 24500, 24700, 25000]
@@ -137,8 +137,9 @@ else:
     params_model = {
         'batch': 1,
         'data_format': 'NCHW',  # optimal for cudnn
-        'restore_fine-tune_bin': '../data/ckpts/fine-tune/attention_bin/CNN-part-gate-img-v4_large/80ep/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt-48500',
-        'save_result_path': '../data/results/flow_att_seg/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]
+        'restore_fine-tune_bin': '../data/ckpts/fine-tune/attention_bin/CNN-part-gate-img-v4_large/40ep/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt-24300',
+        'save_result_path': '../data/results/flow_att_seg/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1],
+        'save_prob_path': '../data/results/prob_map/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]
     }
 
 # display on tsboard only during fine-tuning
@@ -248,9 +249,12 @@ with tf.Session(config=config_gpu) as sess:
             prob_map_, mask_ = sess.run([prob_map, mask], feed_dict=feed_dict_v)
             save_name = str(test_idx+1).zfill(5) + '.png'
             save_path = params_model['save_result_path'] + '/' + save_name
+            prob_path = params_model['save_prob_path'] + '/' + save_name
             # save binary mask
             final_seg = np.multiply(np.squeeze(att_flow), np.squeeze(mask_))
+            final_prob = np.multiply(np.squeeze(att_flow), np.squeeze(prob_map_))
             imsave(save_path, final_seg)
+            imsave(prob_path, final_prob)
             ### Save seg overlay rgb
             save_seg_rgb_path = seg_overlay_path + '/' + save_name
             seg_rgb = overlay_seg_rgb(final_seg, rgb_obj)
