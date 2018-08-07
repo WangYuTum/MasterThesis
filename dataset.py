@@ -144,6 +144,113 @@ class DAVIS_dataset():
 
         return train_imgs, train_gts
 
+    def permute_seq_order(self):
+
+        permute_list = np.random.permutation(self._permut_range_seq)
+
+        return permute_list
+
+    def get_batch_sample(self, permute_list, local_step):
+
+        # get current seq_id and frame id
+        seq_group_id = local_step / 25
+        seq0 = seq_group_id * 2 # the 1st seq id
+        seq1 = seq_group_id * 2 + 1 # the 2nd seq id
+        frame_group_id = local_step % 25
+        frame_id = frame_group_id * 4 # same for both seq
+        # only get the specified seqs and frames
+        seq0_imgs = self._train_imgs[permute_list[seq0]][frame_id:frame_id+4] # list of 4 images
+        seq0_gts = self._train_gts[permute_list[seq0]][frame_id:frame_id+4] # list of 4 seg_gts
+        seq1_imgs = self._train_imgs[permute_list[seq1]][frame_id:frame_id + 4]  # list of 4 images
+        seq1_gts = self._train_gts[permute_list[seq1]][frame_id:frame_id + 4]  # list of 4 seg_gts
+
+        scale = get_scale()
+        # get frames for the 1st seq
+        flip = get_flip_bool()
+        for i in range(4):
+            img, seg, weight, att, prob_map, bb = self.get_single_sample(i, flip, scale, seq0_imgs, seq0_gts)
+
+        # get frames for the 2nd seq
+        flip = get_flip_bool()
+
+
+        # return imgs, segs, weights, atts, prob_maps, bbs
+        return None
+
+    def get_single_sample(self, idx, flip, scale, imgs, gts):
+
+        img = imgs[idx] # [h, w, 3], np.uint8
+        seg = gts[idx] # [h,w], np.uint8
+
+        # random resize/flip
+        stacked = np.concatenate((img, seg[..., np.newaxis]), axis=-1)  # [h, w, 4]
+        if flip:
+            stacked = np.fliplr(stacked)
+        img_H = np.shape(img)[0]
+        img_W = np.shape(img)[1]
+        new_H = int(img_H * scale)
+        new_W = int(img_W * scale)
+        img_obj = Image.fromarray(stacked[:, :, 0:3], mode='RGB')
+        img_obj = img_obj.resize((new_W, new_H), Image.BILINEAR)
+        img = np.array(img_obj, img.dtype) # [h, w, 3], np.uint8
+        seg_obj = Image.fromarray(np.squeeze(stacked[:, :, 3:4]), mode='L')
+        seg_obj = seg_obj.resize((new_W, new_H), Image.NEAREST)
+        seg = np.array(seg_obj, seg.dtype)[..., np.newaxis] # [h, w, 1], np.uint8
+
+        # Generate attention area, size is randomized, plus randomized shift
+        size_att = np.random.randint(9, 36)
+        shiftX_att = np.random.randint(-5, 6)
+        shiftY_att = np.random.randint(-5, 6)
+        struct1 = generate_binary_structure(2, 2)
+        att = binary_dilation(np.squeeze(seg), structure=struct1, iterations=size_att).astype(seg.dtype)
+        att = np.roll(att, (shiftX_att, shiftY_att), (0,1))
+
+        # compute random shape variation through dilate boundary pixels
+        att_obj = Image.fromarray(att)
+        edge_obj = att_obj.filter(ImageFilter.FIND_EDGES)
+        rand_shape_arr = self.get_rand_att_from_edge(edge_obj, 4, 30)
+
+        # compute small-large random false attention area (close to the object)
+        large_dilate = binary_dilation(att, structure=struct1, iterations=40).astype(att.dtype)
+        large_dilate_obj = Image.fromarray(large_dilate)
+        large_edge_obj = large_dilate_obj.filter(ImageFilter.FIND_EDGES)
+        false_att_arr_close = self.get_rand_att_from_edge(large_edge_obj, 5, 50)
+
+        # fuse random shape variations and false attention, convert to binary again
+        att = att + rand_shape_arr + false_att_arr_close
+        att_bool = np.greater(att, 0)
+        att = att_bool.astype(np.uint8)
+
+        # standardize
+        img = img.astype(np.float32) * 1.0 / 255.0
+        img -= data_mean
+        img /= data_std
+        seg = seg.astype(np.int32) # [h, w, 1], np.int32
+        att = att.astype(np.int32)[..., np.newaxis] # [h, w, 1], np.int32
+
+        # get balance weight
+        weight = get_seg_balance_weight(seg, att) # [h,w,1], np.float32
+        # get prob_map
+        prob_map = get_prob_map(seg, att) # [h, w, 1], np.float32
+        # get bbox of att
+        att_obj = Image.fromarray(att)
+        bb_params = att_obj.getbbox()  # [w1,h1,w2,h2]
+        bb = [0] * 4
+        bb[0] = bb_params[1] # offset_h
+        bb[1] = bb_params[0] # offset_w
+        bb[2] = bb_params[3] - bb_params[1] # target_h
+        bb[3] = bb_params[2] - bb_params[0] # target_w
+
+        # reshape
+        img = img[np.newaxis, ...] # [1, h, w, 3], np.float32
+        seg = seg[np.newaxis, ...] # [1, h, w, 1], np.int32
+        weight = weight[np.newaxis, ...] # [1, h, w, 1], np.float32
+        att = att[np.newaxis, ...] # [1, h, w, 1], np.int32
+        prob_map = prob_map[np.newaxis, ...] # [1, h, w, 1], np.float32
+        # bb: [4]
+
+        return img, seg, weight, att, prob_map, bb
+
     def get_a_random_sample(self):
         '''
         :return: img [1, h, w, 3] float32, seg [1, h, w, 1] int32, weight [1, h, w, 1] float32
@@ -577,6 +684,35 @@ def get_seg_balance_weight(seg, att):
     mat_weight = np.add(mat_pos, mat_neg)
 
     return mat_weight
+
+def get_prob_map(seg, att):
+    '''
+    :param seg: [h, w, 1], np.int32
+    :param att: [h, w, 1], np.int32
+    :return: prob_map, [h, w, 1], np.float32
+    '''
+
+    # get label map, 0 for background, 1 for negative, 2 for obj
+    label_map = seg + att
+
+    # generate confidence values in obj area, mostly >= 0.5, a few < 0.5
+    obj_bool = np.greater(att, 1)
+    total_indices = np.nonzero(obj_bool)
+    num_total_indices = total_indices[0].shape[0]
+    low_prob_portion = np.float32(np.random.randint(0, 6)) / 100.0
+    # TODO: if num_low_prob is 0
+    num_low_prob = np.int32(num_total_indices * low_prob_portion) # number of pixels with low confidence
+    num_high_prob = num_total_indices - num_low_prob # number of pixels with high confidence
+    low_prob_indices = np.random.choice(num_total_indices, num_low_prob)
+    high_prob_indices = np.random.choice(num_total_indices, num_high_prob)
+
+
+
+
+    # generate confidence values in negative area, mostly < 0.5, a few >= 0.5
+
+
+
 
 
 def get_balance_weights(s0, s1, s2, s3):

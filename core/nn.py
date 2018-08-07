@@ -9,6 +9,45 @@ from __future__ import print_function
 import tensorflow as tf
 
 
+def lstm_conv2d_train(data_format, input_tensor):
+    '''
+    :param data_format: 'NCHW' or 'NHWC'
+    :param input_tensor: [8,65,256,512] or [8,256,512,65]
+    :return: out of lstm [8,65,256,512] or [8,256,512,65]
+    '''
+
+    scope_name = tf.get_variable_scope().name
+    print('Layer name: %s'%scope_name)
+
+    if data_format == "NCHW":
+        input_tensor = tf.transpose(input_tensor, [0,2,3,1]) # To NHWC
+    ker_shape = [3, 3]
+    lstm_in = tf.stack([input_tensor[0:4,:,:,:], input_tensor[4:8,:,:,:]], axis=0) # [2, 4, 256, 512, 65] [batch, max_time, h, w, c]
+    lstm_cell = tf.contrib.rnn.Conv2DLSTMCell(input_shape=[256, 512, 65],
+                                              output_channels=64,
+                                              kernel_shape=ker_shape,
+                                              use_bias=True,    # default
+                                              skip_connection=False, # default
+                                              forget_bias=1.0,  # default
+                                              initializers=None,    # default
+                                              name='conv2dlstm')
+    zero_state = lstm_cell.zero_state(batch_size=2, dtype=tf.float32)
+    #input_tensor = tf.reshape(input_tensor, [1,2,30,56,128])
+    lstm_out, final_state = tf.nn.dynamic_rnn(cell=lstm_cell,
+                                              inputs=lstm_in,
+                                              sequence_length=[4],
+                                              initial_state=zero_state,
+                                              dtype=tf.float32,
+                                              swap_memory=True)
+    # lstm_out has shape: [2,4,256,512,65], must restore shape of [8, 256, 512, 64]
+    lstm_out = tf.concat([tf.squeeze(lstm_out[0:1,:,:,:,:]), tf.squeeze(lstm_out[1:2,:,:,:,:])], axis=0)
+    # change back to required data_format
+    if data_format == "NCHW":
+        lstm_out = tf.transpose(lstm_out, [0,3,1,2])
+
+    return lstm_out
+
+
 def conv_layer(data_format, input_tensor, stride=1, padding='SAME', shape=None):
     ''' The standard convolution layer '''
     scope_name = tf.get_variable_scope().name
@@ -153,6 +192,39 @@ def get_imgnet_var():
             imgnet_dict['main/B3_' + str(i + 3) + '/conv2/kernel'] = tf.get_variable('kernel')
 
     return imgnet_dict
+
+def get_parent_var():
+
+    ## The main cnn part weights
+    cnn_dict = {}
+    # for the first conv
+    with tf.variable_scope('main/B0', reuse=True):
+        cnn_dict['main/B0/kernel'] = tf.get_variable('kernel')
+    # for all resnet side convs
+    for i in range(4):
+        with tf.variable_scope('main/B' + str(i + 1) + '_0/side', reuse=True):
+            cnn_dict['main/B' + str(i + 1) + '_0/side/kernel'] = tf.get_variable('kernel')
+    # for all convs on the main path
+    for i in range(4):
+        for j in range(3):
+            with tf.variable_scope('main/B' + str(i + 1) + '_' + str(j) + '/conv1', reuse=True):
+                cnn_dict['main/B' + str(i + 1) + '_' + str(j) + '/conv1/kernel'] = tf.get_variable('kernel')
+            with tf.variable_scope('main/B' + str(i + 1) + '_' + str(j) + '/conv2', reuse=True):
+                cnn_dict['main/B' + str(i + 1) + '_' + str(j) + '/conv2/kernel'] = tf.get_variable('kernel')
+    # for convs on B3_3, B3_4, B3_5
+    for i in range(3):
+        with tf.variable_scope('main/B3_' + str(i + 3) + '/conv1', reuse=True):
+            cnn_dict['main/B3_' + str(i + 3) + '/conv1/kernel'] = tf.get_variable('kernel')
+        with tf.variable_scope('main/B3_' + str(i + 3) + '/conv2', reuse=True):
+            cnn_dict['main/B3_' + str(i + 3) + '/conv2/kernel'] = tf.get_variable('kernel')
+
+    # for the side path
+    for i in range(4):
+        with tf.variable_scope('main/B' + str(i+1) + '_side_path', reuse=True):
+            cnn_dict['main/B' + str(i + 1) + '_side_path/kernel'] = tf.get_variable('kernel')
+            cnn_dict['main/B' + str(i + 1) + '_side_path/bias'] = tf.get_variable('bias')
+
+    return cnn_dict
 
 
 def param_lr():

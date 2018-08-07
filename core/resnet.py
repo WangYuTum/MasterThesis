@@ -28,9 +28,13 @@ class ResNet():
         if self._data_format is not "NCHW" and self._data_format is not "NHWC":
             sys.exit("Invalid data format. Must be either 'NCHW' or 'NHWC'.")
 
-    def _build_model(self, images, atts):
+    def _build_model(self, images, atts, prob, bb, training):
         '''
-        :param images: [1,H,W,3], tf.float32
+        :param images: [8,H,W,3], tf.float32
+        :param atts: [8,H,W,1], tf.int32
+        :param prob: [8,H,W,1], tf.float32
+        :param bb: a list of length 8, each element is a list of length 4 specifying [offset_h, offset_w, target_h, target_w]
+        :param training: bool
         :return: segmentation output before softmax
         '''
         model = {}
@@ -39,7 +43,7 @@ class ResNet():
         if self._data_format == "NCHW":
             images = tf.transpose(images, [0,3,1,2])    # [N,C,H,W]
 
-        ## attention gating on raw images, assuming batch=1
+        ## attention gating on raw images, assuming seq=2, frames=4, hence batch=8
         images = self._att_gate(images, atts)
 
         ## The following 'main' scope is the primary (shared) feature layers, downsampling 16x
@@ -146,35 +150,80 @@ class ResNet():
                 else:
                     side_16_f = tf.image.resize_images(side_16, [im_size[1], im_size[2]])  # NHWC
 
-            # concat and linearly fuse
+            # concat
             if self._data_format == "NCHW":
-                concat_seg_feat = tf.concat([side_2_f, side_4_f, side_8_f, side_16_f], axis=1)
+                concat_feat = tf.concat([side_2_f, side_4_f, side_8_f, side_16_f], axis=1) # [N, 64, H, W]
             else:
-                concat_seg_feat = tf.concat([side_2_f, side_4_f, side_8_f, side_16_f], axis=3)
-            with tf.variable_scope('fuse'):
-                seg_out = nn.conv_layer(self._data_format, concat_seg_feat, 1, 'SAME', [1, 1, 64, 2])
+                concat_feat = tf.concat([side_2_f, side_4_f, side_8_f, side_16_f], axis=3) # [N, H, W, 64]
+
+        # feature update branch
+        with tf.variable_scope('feat_update'):
+            # get bbox from att box coordinates, assuming batch=8
+            feats = [0] * 8
+            if self._data_format == 'NCHW':
+                concat_feat = tf.transpose(concat_feat, [0, 2, 3, 1])  # To [N, H, W, 64]
+            for i in range(8):
+                sub_feats = tf.image.crop_to_bounding_box(concat_feat[i:i+1,:,:,:], bb[i][0], bb[i][1], bb[i][2], bb[i][3])
+                sub_att = tf.image.crop_to_bounding_box(tf.cast(atts[i:i+1,:,:,:], tf.float32), bb[i][0], bb[i][1], bb[i][2], bb[i][3])
+                sub_conf = tf.image.crop_to_bounding_box(prob[i:i+1,:,:,:], bb[i][0], bb[i][1], bb[i][2], bb[i][3])
+                sub_att_feat = tf.multiply(sub_feats, sub_att)
+                sub_att_feat = tf.concat([sub_conf, sub_att_feat], axis=3) # [1, H, W, 65]
+                feats[i] = tf.image.resize_images(sub_att_feat, [256, 512])  # [1, 256, 512, 65]
+            # stack all boxed feats to batch=8
+            stack_feats = tf.concat([feats[0], feats[1], feats[2], feats[3],
+                                     feats[4], feats[5], feats[6], feats[7]], axis=3)
+            if self._data_format == 'NCHW':
+                stack_feats = tf.transpose(stack_feats, [0, 3, 1, 2]) # [N, 65, H, W]
+            # go through a conv 1x1 before lstm
+            with tf.variable_scope('conv_in_lstm'):
+                feat_fuse = nn.conv_layer(self._data_format, stack_feats, 1, 'SAME', [1, 1, 65, 65])
+                feat_fuse = nn.bias_layer(self._data_format, feat_fuse, 65)
+                feat_fuse = nn.ReLu_layer(feat_fuse)
+            # LSTM layer
+            with tf.variable_scope('lstm_2d'):
+                if training:
+                    lstm_out = nn.lstm_conv2d_train(self._data_format, feat_fuse) # out: [8, 64, 256, 512] if NCHW
+            # resize all bbox to original size and pad to image size
+            full_feats = [0] * 8
+            if self._data_format == 'NCHW':
+                lstm_out = tf.transpose(lstm_out, [0, 2, 3, 1]) # to [8, 256, 512, 64]
+            for i in range(8):
+                full_feat = tf.image.resize_images(lstm_out[i:i+1,:,:,:], [bb[i][2], bb[i][3]]) # to bbox original size
+                full_feats[i] = tf.image.pad_to_bounding_box(full_feat, bb[i][0], bb[i][1], im_size[1], im_size[2]) # to input image size
+            stack_full_feats = tf.concat([full_feats[0], full_feats[1], full_feats[2], full_feats[3],
+                                          full_feats[4], full_feats[5], full_feats[6], full_feats[7]], axis=3)
+            if self._data_format == 'NCHW':
+                stack_full_feats = tf.transpose(stack_full_feats, [0, 3, 1, 2]) # [8, H, W, 64]
+            # conv after lstm
+            with tf.variable_scope('conv_out_lstm'):
+                feat_after_lstm = nn.conv_layer(self._data_format, stack_full_feats, 1, 'SAME', [1, 1, 64, 64])
+                feat_after_lstm = nn.bias_layer(self._data_format, feat_after_lstm, 64)
+                feat_after_lstm = nn.ReLu_layer(feat_after_lstm)
+            # conv classifier
+            with tf.variable_scope('conv_cls'):
+                seg_out = nn.conv_layer(self._data_format, feat_after_lstm, 1, 'SAME', [1, 1, 64, 2])
                 seg_out = nn.bias_layer(self._data_format, seg_out, 2)
 
         return seg_out
 
     def _att_gate(self, images, atts):
         '''
-        :param images: [1,H,W,3] or [1,3,H,W], tf.float32
-        :param atts: [1,H,W,1], tf.int32
+        :param images: [8,H,W,3] or [8,3,H,W], tf.float32
+        :param atts: [8,H,W,1], tf.int32
         :return: gated image
         '''
         if self._data_format == 'NCHW':
             atts = tf.transpose(atts, [0, 3, 1, 2])
         att_mask = tf.cast(atts, tf.float32)
-        gated_img = tf.multiply(images, att_mask)
+        gated_img = tf.multiply(images, att_mask) # automatically broadcasting
 
         return gated_img
 
     def _seg_loss(self, seg_out, seg_gt, seg_weight, att):
         '''
-        :param seg_out: logits, [4,H,W,2] or [4,2,H,W], tf.float32
-        :param seg_gt: [4,H,W,1], tf.int32
-        :param seg_weight: [4,H,W,1], tf.float32
+        :param seg_out: logits, [8,H,W,2] or [8,2,H,W], tf.float32
+        :param seg_gt: [8,H,W,1], tf.int32
+        :param seg_weight: [8,H,W,1], tf.float32
         :return: scalar (balanced cross-entropy), tf.float32
         '''
 
@@ -186,18 +235,19 @@ class ResNet():
 
         return loss
 
-    def train(self, feed_img, feed_seg, feed_weight, feed_att, global_step, acc_count):
+    def train(self, feed_img, feed_seg, feed_weight, feed_att, feed_prob, bb, global_step):
         '''
-        :param feed_img: [1,H,W,3], tf.float32
-        :param feed_seg: [1,H,W,1], tf.int32
-        :param feed_weight: [1,H,W,1], tf.float32
-        :param feed_att: [1,H,W,1], tf.int32
+        :param feed_img: [8,H,W,3], tf.float32
+        :param feed_seg: [8,H,W,1], tf.int32
+        :param feed_weight: [8,H,W,1], tf.float32
+        :param feed_att: [8,H,W,1], tf.int32
+        :param feed_prob: [8,H,W,1], tf.float32
+        :param bb: bbox params for batch=8
         :param global_step: keep track of global train step
-        :param acc_count: number of accumulated gradients
-        :return: total_loss, train_step_op, grad_acc_op
+        :return: total_loss, bp_step
         '''
 
-        seg_out = self._build_model(feed_img, feed_att) # seg_out shape: [1,H,W,2] or [1,2,H,W] with original input image size
+        seg_out = self._build_model(feed_img, feed_att, feed_prob, bb, True) # original image size
         total_loss = self._seg_loss(seg_out, feed_seg, feed_weight, feed_att) \
                      + self._l2_loss()
         tf.summary.scalar('total_loss', total_loss)
@@ -209,9 +259,9 @@ class ResNet():
             seg_pred = seg_out
         tf.summary.image('pred', tf.cast(tf.nn.softmax(seg_pred)[:, :, :, 1:2], tf.float16))
 
-        bp_step, grad_acc_op = self._optimize(total_loss, acc_count, global_step)
+        bp_step = tf.train.AdamOptimizer(self._init_lr).minimize(total_loss, global_step=global_step)
 
-        return total_loss, bp_step, grad_acc_op
+        return total_loss, bp_step
 
     def _optimize(self, loss, acc_count, global_step):
         '''
