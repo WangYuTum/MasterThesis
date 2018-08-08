@@ -27,7 +27,7 @@ params_data = {
     'seq_set': '/usr/stud/wangyu/DAVIS17_train_val/ImageSets/2017/train.txt',
 }
 with tf.device('/cpu:0'):
-    mydata = DAVIS_dataset(params_data) ### TODO: make sure each batch has the same image size
+    mydata = DAVIS_dataset(params_data)
 
 # config train params
 params_model = {
@@ -44,7 +44,7 @@ params_model = {
 epochs = 100
 frames_per_seq = 100 # each seq is extended to 100 frames by padding previous frames inversely
 num_seq = 60
-steps_per_ep = num_seq * frames_per_seq / params_model['batch'] # 750 if batch=4*2
+steps_per_ep = int(num_seq * frames_per_seq / params_model['batch']) # 750 if batch=4*2
 total_steps = epochs * steps_per_ep # total steps of BP, 60000
 global_step = tf.Variable(0, name='global_step', trainable=False) # incremented automatically by 1 after 1 BP
 save_ckpt_interval = 7500 # corresponds to 10 epoch
@@ -94,8 +94,9 @@ with tf.Session(config=config_gpu) as sess:
         permute_list = mydata.permute_seq_order()
         for local_step in range(steps_per_ep):
             # choose two seqs in the shuffle list, 4 frames per seq
-            # TODO: get seq frames
             imgs, segs, weights, atts, prob_maps, bbs = mydata.get_batch_sample(permute_list, local_step)
+            if imgs is None:
+                continue
             #img, seg, weight, att = mydata.get_a_random_sample() # [1,h,w,3] float32, [1,h,w,1] int32, [1,h,w,1] float32
             feed_dict_v = {feed_img: imgs, feed_seg: segs, feed_weight: weights,
                            feed_att: atts, feed_prob: prob_maps, feed_bb: bbs}

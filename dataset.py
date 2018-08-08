@@ -153,29 +153,54 @@ class DAVIS_dataset():
     def get_batch_sample(self, permute_list, local_step):
 
         # get current seq_id and frame id
-        seq_group_id = local_step / 25
+        seq_group_id = int(local_step / 25)
         seq0 = seq_group_id * 2 # the 1st seq id
         seq1 = seq_group_id * 2 + 1 # the 2nd seq id
-        frame_group_id = local_step % 25
+        frame_group_id = int(local_step % 25)
         frame_id = frame_group_id * 4 # same for both seq
+        ### Print Debug
+        # print('seq: {0}, {1}'.format(seq0, seq1))
+        # print('frame: {}'.format(frame_id))
         # only get the specified seqs and frames
-        seq0_imgs = self._train_imgs[permute_list[seq0]][frame_id:frame_id+4] # list of 4 images
-        seq0_gts = self._train_gts[permute_list[seq0]][frame_id:frame_id+4] # list of 4 seg_gts
+        seq0_imgs = self._train_imgs[permute_list[seq0]][frame_id:frame_id + 4] # list of 4 images
+        seq0_gts = self._train_gts[permute_list[seq0]][frame_id:frame_id + 4] # list of 4 seg_gts
         seq1_imgs = self._train_imgs[permute_list[seq1]][frame_id:frame_id + 4]  # list of 4 images
         seq1_gts = self._train_gts[permute_list[seq1]][frame_id:frame_id + 4]  # list of 4 seg_gts
 
         scale = get_scale()
         # get frames for the 1st seq
         flip = get_flip_bool()
-        for i in range(4):
-            img, seg, weight, att, prob_map, bb = self.get_single_sample(i, flip, scale, seq0_imgs, seq0_gts)
+        bbs = []
+        imgs, segs, weights, atts, prob_maps, bb = self.get_single_sample(0, flip, scale, seq0_imgs, seq0_gts)
+        if imgs is None:
+            return None, None, None, None, None, None
+        bbs.append(bb)
+        for i in range(3):
+            img, seg, weight, att, prob_map, bb = self.get_single_sample(i+1, flip, scale, seq0_imgs, seq0_gts)
+            if img is None:
+                return None, None, None, None, None, None
+            imgs = np.concatenate((imgs, img))
+            segs = np.concatenate((segs, seg))
+            weights = np.concatenate((weights, weight))
+            atts = np.concatenate((atts, att))
+            prob_maps = np.concatenate((prob_maps, prob_map))
+            bbs.append(bb)
 
         # get frames for the 2nd seq
         flip = get_flip_bool()
+        for i in range(4):
+            img, seg, weight, att, prob_map, bb = self.get_single_sample(i, flip, scale, seq1_imgs, seq1_gts)
+            if img is None:
+                return None, None, None, None, None, None
+            imgs = np.concatenate((imgs, img))
+            segs = np.concatenate((segs, seg))
+            weights = np.concatenate((weights, weight))
+            atts = np.concatenate((atts, att))
+            prob_maps = np.concatenate((prob_maps, prob_map))
+            bbs.append(bb)
+        bbs = np.asarray(bbs, np.int32)
 
-
-        # return imgs, segs, weights, atts, prob_maps, bbs
-        return None
+        return imgs, segs, weights, atts, prob_maps, bbs
 
     def get_single_sample(self, idx, flip, scale, imgs, gts):
 
@@ -186,14 +211,16 @@ class DAVIS_dataset():
         stacked = np.concatenate((img, seg[..., np.newaxis]), axis=-1)  # [h, w, 4]
         if flip:
             stacked = np.fliplr(stacked)
-        img_H = np.shape(img)[0]
-        img_W = np.shape(img)[1]
+        img_H = 480 # np.shape(img)[0], to make sure all images in a batch has same shape
+        img_W = 854 # np.shape(img)[1]
         new_H = int(img_H * scale)
         new_W = int(img_W * scale)
         img_obj = Image.fromarray(stacked[:, :, 0:3], mode='RGB')
+        # NOTE: Resize all to [480, 854, 3] first
         img_obj = img_obj.resize((new_W, new_H), Image.BILINEAR)
         img = np.array(img_obj, img.dtype) # [h, w, 3], np.uint8
         seg_obj = Image.fromarray(np.squeeze(stacked[:, :, 3:4]), mode='L')
+        # NOTE: Resize all to [480, 854, 3] first
         seg_obj = seg_obj.resize((new_W, new_H), Image.NEAREST)
         seg = np.array(seg_obj, seg.dtype)[..., np.newaxis] # [h, w, 1], np.uint8
 
@@ -233,8 +260,12 @@ class DAVIS_dataset():
         # get prob_map
         prob_map = get_prob_map(seg, att) # [h, w, 1], np.float32
         # get bbox of att
-        att_obj = Image.fromarray(att)
+        att_obj = Image.fromarray(np.squeeze(att.astype(np.uint8)))
         bb_params = att_obj.getbbox()  # [w1,h1,w2,h2]
+        if bb_params is None:
+            # if bbox is empty, go to next batch.
+            print('Got empty bbox, go to next batch.')
+            return None, None, None, None, None, None
         bb = [0] * 4
         bb[0] = bb_params[1] # offset_h
         bb[1] = bb_params[0] # offset_w
@@ -692,27 +723,81 @@ def get_prob_map(seg, att):
     :return: prob_map, [h, w, 1], np.float32
     '''
 
+    seg = np.squeeze(seg)
+    att = np.squeeze(att)
     # get label map, 0 for background, 1 for negative, 2 for obj
     label_map = seg + att
 
-    # generate confidence values in obj area, mostly >= 0.5, a few < 0.5
-    obj_bool = np.greater(att, 1)
+    # generate confidence values in obj area, mostly >= 0.5, a few < 0.5 (up to 5%)
+    obj_bool = np.greater(label_map, 1)
     total_indices = np.nonzero(obj_bool)
     num_total_indices = total_indices[0].shape[0]
     low_prob_portion = np.float32(np.random.randint(0, 6)) / 100.0
-    # TODO: if num_low_prob is 0
     num_low_prob = np.int32(num_total_indices * low_prob_portion) # number of pixels with low confidence
-    num_high_prob = num_total_indices - num_low_prob # number of pixels with high confidence
-    low_prob_indices = np.random.choice(num_total_indices, num_low_prob)
-    high_prob_indices = np.random.choice(num_total_indices, num_high_prob)
+    if num_low_prob != 0:
+        num_high_prob = num_total_indices - num_low_prob # number of pixels with high confidence
+        low_prob_indices = np.random.choice(num_total_indices, num_low_prob)
+        high_prob_indices = np.random.choice(num_total_indices, num_high_prob)
+        data = np.float32(np.random.randint(0, 500, low_prob_indices.size)) / 1000.0
+        row_ind = []
+        col_ind = []
+        for idx in low_prob_indices:
+            row_ind.append(total_indices[0][idx])
+            col_ind.append(total_indices[1][idx])
+        sparse_mat = csr_matrix((data, (row_ind, col_ind)), shape=att.shape, dtype=np.float32)
+        dense_arr_low_obj = sparse_mat.toarray().astype(np.float32)
+    else:
+        dense_arr_low_obj = np.zeros(att.shape, np.float32)
+        high_prob_indices = range(num_total_indices)
+    data = np.float32(np.random.randint(500, 1000, len(high_prob_indices))) / 1000.0
+    row_ind = []
+    col_ind = []
+    for idx in high_prob_indices:
+        row_ind.append(total_indices[0][idx])
+        col_ind.append(total_indices[1][idx])
+    sparse_mat = csr_matrix((data, (row_ind, col_ind)), shape=att.shape, dtype=np.float32)
+    dense_arr_high_obj = sparse_mat.toarray().astype(np.float32)
+    obj_arr = dense_arr_low_obj + dense_arr_high_obj
 
+    # generate confidence values in negative area, mostly < 0.5, a few >= 0.5 (up to 5%)
+    nega_bool = np.equal(label_map, 1)
+    total_indices = np.nonzero(nega_bool)
+    num_total_indices = total_indices[0].shape[0]
+    high_prob_portion = np.float32(np.random.randint(0, 6)) / 100.0
+    num_high_prob = np.int32(num_total_indices * high_prob_portion)  # number of pixels with high confidence
+    if num_high_prob != 0:
+        num_low_prob = num_total_indices - num_high_prob  # number of pixels with low confidence
+        high_prob_indices = np.random.choice(num_total_indices, num_high_prob)
+        low_prob_indices = np.random.choice(num_total_indices, num_low_prob)
+        data = np.float32(np.random.randint(500, 1000, high_prob_indices.size)) / 1000.0
+        row_ind = []
+        col_ind = []
+        for idx in high_prob_indices:
+            row_ind.append(total_indices[0][idx])
+            col_ind.append(total_indices[1][idx])
+        sparse_mat = csr_matrix((data, (row_ind, col_ind)), shape=att.shape, dtype=np.float32)
+        dense_arr_high_obj = sparse_mat.toarray().astype(np.float32)
+    else:
+        dense_arr_high_obj = np.zeros(att.shape, np.float32)
+        low_prob_indices = range(num_total_indices)
+    data = np.float32(np.random.randint(0, 500, len(low_prob_indices))) / 1000.0
+    row_ind = []
+    col_ind = []
+    for idx in low_prob_indices:
+        row_ind.append(total_indices[0][idx])
+        col_ind.append(total_indices[1][idx])
+    sparse_mat = csr_matrix((data, (row_ind, col_ind)), shape=att.shape, dtype=np.float32)
+    dense_arr_low_obj = sparse_mat.toarray().astype(np.float32)
+    nega_arr = dense_arr_low_obj + dense_arr_high_obj
 
+    full_prob_map = obj_arr + nega_arr
 
+    if full_prob_map.shape != att.shape:
+        sys.exit('constructed prob_map {0} does not match att/seg image {1}'.format(full_prob_map.shape, att.shape))
 
-    # generate confidence values in negative area, mostly < 0.5, a few >= 0.5
+    full_prob_map = full_prob_map[..., np.newaxis]
 
-
-
+    return full_prob_map
 
 
 def get_balance_weights(s0, s1, s2, s3):
