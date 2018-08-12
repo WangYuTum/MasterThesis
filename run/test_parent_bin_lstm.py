@@ -106,7 +106,7 @@ with tf.device('/cpu:0'):
     feed_img = tf.placeholder(tf.float32, [1, None, None, 3])
     feed_att = tf.placeholder(tf.int32, [1, None, None, 1])
     feed_prob = tf.placeholder(tf.float32, [1, None, None, 1])
-    feed_bb = tf.placeholder(tf.int32, [1, 4])
+    feed_bb = tf.placeholder(tf.int32, [4])
     feed_state = tf.placeholder(tf.float32, [2, 256, 512, 64])
 
 # config model params
@@ -114,14 +114,15 @@ params_model = {
     'batch': 1,
     'data_format': 'NCHW',  # optimal for cudnn
     'restore_fine-tune_main': '../data/ckpts/fine-tune/attention_bin/CNN-part-gate-img-v4_large/40ep/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt-24300',
-    'restore_lstm': '../data/ckpts/attention_bin/CNN-part-gate-img-v6_lstm/'+'/att_bin.ckpt-7500',
+    #'restore_fine-tune_main': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large/att_bin.ckpt-24000',
+    'restore_lstm': '../data/ckpts/attention_bin/CNN-part-gate-img-v6_lstm/att_bin.ckpt-48000',
     'save_result_path': '../data/results/flow_att_seg/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1],
     'save_prob_path': '../data/results/prob_map/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]
 }
 
 # build network, on GPU by default
 model = resnet.ResNet(params_model)
-init_prob_map, init_seg_mask, final_seg_mask, assign_state_ops, current_state = model.test(feed_img, feed_att, feed_prob, feed_bb, feed_state)
+init_prob_map, init_seg_mask, final_seg_mask, assign_state_ops, current_state, init_lstm_inf = model.test(feed_img, feed_att, feed_prob, feed_bb, feed_state)
 init_op = tf.global_variables_initializer()
 # define Saver
 saver_main = tf.train.Saver(var_list=get_main_var())
@@ -145,19 +146,54 @@ with tf.Session(config=config_gpu) as sess:
     flow_search = os.path.join(val_seq_paths[FINE_TUNE_seq].replace('JPEGImages', 'Flow'), '*.flo')
     flow_files = glob.glob(flow_search)
     flow_files.sort()
-    seg0_file = os.path.join(val_seq_paths[FINE_TUNE_seq].replace('JPEGImages', 'Annotations'), '00000.png')
-    seg0_arr = np.greater(np.array(Image.open(seg0_file)), 0).astype(np.uint8)
-    flow0 = read_flow(flow_files[0])
-    new_seg = transf_slow(seg0_arr, flow0)
-    struct1 = generate_binary_structure(2, 2)
-    att_flow = binary_dilation(new_seg, structure=struct1, iterations=30).astype(new_seg.dtype)
-    ###
     ### Get image lists of the current sequence
     img_search = os.path.join(val_seq_paths[FINE_TUNE_seq], '*.jpg')
     img_files = glob.glob(img_search)
     img_files.sort()
+    seg0_file = os.path.join(val_seq_paths[FINE_TUNE_seq].replace('JPEGImages', 'Annotations'), '00000.png')
+    seg0_arr = np.greater(np.array(Image.open(seg0_file)), 0).astype(np.uint8)
+
+    ### for the 0th frame, use it to initialize lstm state
+    struct1 = generate_binary_structure(2, 2)
+    att_flow = binary_dilation(seg0_arr, structure=struct1, iterations=30).astype(seg0_arr.dtype)
+    att_obj = Image.fromarray(np.squeeze(att_flow.astype(np.uint8)))
+    bb_params = att_obj.getbbox()  # [w1,h1,w2,h2]
+    bb = [0] * 4
+    bb[0] = bb_params[1]  # offset_h
+    bb[1] = bb_params[0]  # offset_w
+    bb[2] = bb_params[3] - bb_params[1]  # target_h
+    bb[3] = bb_params[2] - bb_params[0]  # target_w
+    bb = np.asarray(bb, dtype=np.int32)
+    bb = np.reshape(bb, (4,))
+    feed_dict_v = {feed_img: test_frames[0][0][np.newaxis,:],
+                   feed_att: att_flow[np.newaxis, ..., np.newaxis],
+                   feed_prob: seg0_arr[np.newaxis, ..., np.newaxis].astype(np.float32),
+                   feed_bb: bb}
+    init_lstm_inf_ = sess.run(init_lstm_inf, feed_dict=feed_dict_v)
+    current_state_val = np.concatenate((init_lstm_inf_, init_lstm_inf_), axis=0)
+    assign_state_ops_ = sess.run(assign_state_ops, feed_dict={feed_state: current_state_val})
+    init_seg_mask_, final_seg_mask_, current_state_ = sess.run([init_seg_mask, final_seg_mask, current_state], feed_dict=feed_dict_v)
+    current_state_val = np.concatenate((current_state_[0], current_state_[1]), axis=0)
+    save_name = str(0).zfill(5) + '.png'
+    save_path = params_model['save_result_path'] + '/' + save_name
+    seg_mask_0th = np.multiply(np.squeeze(att_flow), np.squeeze(init_seg_mask_))
+    imsave(save_path, seg_mask_0th)
+
+    ### get ready for the 1th frame
+    flow0 = read_flow(flow_files[0])
+    new_seg = transf_slow(seg0_arr, flow0)
+    att_flow = binary_dilation(new_seg, structure=struct1, iterations=30).astype(new_seg.dtype)
+    att_obj = Image.fromarray(np.squeeze(att_flow.astype(np.uint8)))
+    bb_params = att_obj.getbbox()  # [w1,h1,w2,h2]
+    bb = [0] * 4
+    bb[0] = bb_params[1]  # offset_h
+    bb[1] = bb_params[0]  # offset_w
+    bb[2] = bb_params[3] - bb_params[1]  # target_h
+    bb[3] = bb_params[2] - bb_params[0]  # target_w
+    bb = np.asarray(bb, dtype=np.int32)
+    bb = np.reshape(bb, (4,))
     att_rgb_overlay_path = params_model['save_result_path'].replace('flow_att_seg', 'overlaid/flow-to-att_rgb')
-    seg_overlay_path = att_rgb_overlay_path.replace('flow-to-att_rgb', 'flow-to-att-to-seg_rgb')
+    init_seg_overlay_path = att_rgb_overlay_path.replace('flow-to-att_rgb', 'flow-to-att-to-seg_rgb')
     ###
     for test_idx in range(len(test_frames)):
         print("Inference on frame {}".format(test_idx+1))
@@ -167,32 +203,55 @@ with tf.Session(config=config_gpu) as sess:
         att_rgb_save_name = str(test_idx+1).zfill(5) + '.png'
         att_rgb_save_path = att_rgb_overlay_path + '/' + att_rgb_save_name
         att_rgb.save(att_rgb_save_path)
-        ###
-        feed_dict_v = {feed_img: test_frames[test_idx][0][np.newaxis,:],
-                       feed_att: att_flow[np.newaxis,...,np.newaxis]}
-        # prob_map: [1,H,W] tf.float32, mask: [1,H,W] tf.int16
-        prob_map_, mask_ = sess.run([prob_map, mask], feed_dict=feed_dict_v)
+        ### 1st forward pass, only get init seg estimation
+        feed_dict_v = {feed_img: test_frames[test_idx+1][0][np.newaxis,:],
+                       feed_att: att_flow[np.newaxis, ..., np.newaxis]}
+        init_prob_map_, init_seg_mask_ = sess.run([init_prob_map, init_seg_mask], feed_dict=feed_dict_v) # [1,H,W]
         save_name = str(test_idx+1).zfill(5) + '.png'
         save_path = params_model['save_result_path'] + '/' + save_name
         prob_path = params_model['save_prob_path'] + '/' + save_name
-        # save binary mask
-        final_seg = np.multiply(np.squeeze(att_flow), np.squeeze(mask_))
-        final_prob = np.multiply(np.squeeze(att_flow), np.squeeze(prob_map_))
-        imsave(save_path, final_seg)
-        imsave(prob_path, final_prob)
-        ### Save seg overlay rgb
-        save_seg_rgb_path = seg_overlay_path + '/' + save_name
-        seg_rgb = overlay_seg_rgb(final_seg, rgb_obj)
-        seg_rgb.save(save_seg_rgb_path)
-        ###
+        # save init seg mask
+        init_seg_mask_ = np.multiply(np.squeeze(att_flow), np.squeeze(init_seg_mask_))
+        init_prob_map_ = np.multiply(np.squeeze(att_flow.astype(np.float32)), np.squeeze(init_prob_map_))
+        # imsave(save_path, init_seg_mask_)
+        # imsave(prob_path, init_prob_map_)
+        ### Save init seg overlay rgb
+        save_init_seg_rgb_path = init_seg_overlay_path + '/' + save_name
+        init_seg_rgb = overlay_seg_rgb(init_seg_mask_, rgb_obj)
+        init_seg_rgb.save(save_init_seg_rgb_path)
+        ### 2nd run, assign lstm state
+        assign_state_ops_ = sess.run(assign_state_ops, feed_dict={feed_state: current_state_val})
+        ### 3rd run, get final seg and update hidden state
+        feed_dict_v = {feed_img: test_frames[test_idx+1][0][np.newaxis,:],
+                       feed_att: att_flow[np.newaxis, ..., np.newaxis],
+                       feed_prob: init_prob_map_[np.newaxis, ..., np.newaxis],
+                       feed_bb: bb}
+        final_seg_mask_, current_state_ = sess.run([final_seg_mask, current_state], feed_dict=feed_dict_v)
+        # current_state_ tuple ([1,256,512,64],[1,256,512,64])
+        current_state_val = np.concatenate((current_state_[0], current_state_[1]), axis=0)
+        ### save final seg mask
+        final_seg_mask_ = np.multiply(np.squeeze(att_flow), np.squeeze(final_seg_mask_))
+        save_path = params_model['save_result_path'] + '/' + save_name
+        imsave(save_path, final_seg_mask_)
+        ### save final seg overlay rgb
+        save_final_seg_rgb_path = init_seg_overlay_path + '/final/' + save_name
+        final_seg_rgb = overlay_seg_rgb(final_seg_mask_, rgb_obj)
+        final_seg_rgb.save(save_final_seg_rgb_path)
         ### Get next attention
         if test_idx != len(test_frames) - 1:
             flow_arr = read_flow(flow_files[test_idx + 1])
-            new_seg = transf_slow(final_seg, flow_arr)
-            att_flow = binary_dilation(new_seg, structure=struct1, iterations=35).astype(new_seg.dtype)
-        ###
-        # save prob map
-        # imsave(save_path.replace('.png', '_prob.png'), np.squeeze(prob_map_))
+            new_seg = transf_slow(final_seg_mask_, flow_arr)
+            att_flow = binary_dilation(new_seg, structure=struct1, iterations=40).astype(new_seg.dtype)
+        ### Get next att box
+        att_obj = Image.fromarray(np.squeeze(att_flow.astype(np.uint8)))
+        bb_params = att_obj.getbbox()  # [w1,h1,w2,h2]
+        bb = [0] * 4
+        bb[0] = bb_params[1]  # offset_h
+        bb[1] = bb_params[0]  # offset_w
+        bb[2] = bb_params[3] - bb_params[1]  # target_h
+        bb[3] = bb_params[2] - bb_params[0]  # target_w
+        bb = np.asarray(bb, dtype=np.int32)
+        bb = np.reshape(bb, (4,))
         print("Saved result.")
         print("Finished inference.")
 

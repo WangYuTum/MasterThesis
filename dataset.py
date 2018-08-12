@@ -150,7 +150,38 @@ class DAVIS_dataset():
 
         return permute_list
 
-    def get_batch_sample(self, permute_list, local_step):
+    def get_batch1_sample(self, permute_list, local_step):
+
+        # get current seq_id and f_id
+        seq_id = int(local_step/10)
+        f_id = int(local_step%10)
+        seq_imgs = self._train_imgs[permute_list[seq_id]][f_id:f_id+10] # list of 10 imgs
+        seq_gts = self._train_gts[permute_list[seq_id]][f_id:f_id+10]  # list of 10 seg_gts
+
+        # get data for each frame
+        scale = get_scale()
+        flip = get_flip_bool()
+        bbs = []
+        imgs, segs, weights, atts, prob_maps, bb = self.get_single_sample(0, flip, scale, seq_imgs, seq_gts)
+        if imgs is None:
+            return None, None, None, None, None, None
+        bbs.append(bb)
+        for i in range(9):
+            img, seg, weight, att, prob_map, bb = self.get_single_sample(i+1, flip, scale, seq_imgs, seq_gts)
+            if img is None:
+                return None, None, None, None, None, None
+            imgs = np.concatenate((imgs, img))
+            segs = np.concatenate((segs, seg))
+            weights = np.concatenate((weights, weight))
+            atts = np.concatenate((atts, att))
+            prob_maps = np.concatenate((prob_maps, prob_map))
+            bbs.append(bb)
+        bbs = np.asarray(bbs, np.int32)
+
+        return imgs, segs, weights, atts, prob_maps, bbs
+
+
+    def get_batch2_sample(self, permute_list, local_step):
 
         # get current seq_id and frame id
         seq_group_id = int(local_step / 25)
@@ -520,14 +551,14 @@ class DAVIS_dataset():
     def get_test_frames(self):
 
         # Assuming we know the attention area/window
-        frame_list = self._val_seq_frames[1:] # shape of frame [h,w,3]
+        frame_list = self._val_seq_frames # shape of frame [h,w,3]
         num_frames = len(frame_list)
         frame_pair = []
         gt_search_path = os.path.join(self._seq_path.replace('JPEGImages', 'Annotations'), '*.png')
         files_gt = glob.glob(gt_search_path)
         files_gt.sort()
         for i in range(num_frames):
-            frame_gt = np.array(Image.open(files_gt[i+1])).astype(np.uint8)
+            frame_gt = np.array(Image.open(files_gt[i])).astype(np.uint8)
             # convert to binary
             gt_bool = np.greater(frame_gt, 0)
             gt_bin = gt_bool.astype(np.uint8) # [h,w], np.uint8
@@ -728,76 +759,117 @@ def get_prob_map(seg, att):
     # get label map, 0 for background, 1 for negative, 2 for obj
     label_map = seg + att
 
-    # generate confidence values in obj area, mostly >= 0.5, a few < 0.5 (up to 5%)
+    # generate confidence values in obj area, mostly >= 0.9, a few < 0.1 by choosing random seed an dilate
     obj_bool = np.greater(label_map, 1)
     total_indices = np.nonzero(obj_bool)
     num_total_indices = total_indices[0].shape[0]
-    low_prob_portion = np.float32(np.random.randint(0, 6)) / 100.0
-    num_low_prob = np.int32(num_total_indices * low_prob_portion) # number of pixels with low confidence
-    if num_low_prob != 0:
-        num_high_prob = num_total_indices - num_low_prob # number of pixels with high confidence
-        low_prob_indices = np.random.choice(num_total_indices, num_low_prob)
-        high_prob_indices = np.random.choice(num_total_indices, num_high_prob)
-        data = np.float32(np.random.randint(0, 500, low_prob_indices.size)) / 1000.0
+    num_low_seed = np.random.randint(0,5)  # number of seed pixels with low confidence
+    if num_low_seed != 0:
+        low_prob_indices = np.random.choice(num_total_indices, num_low_seed)
+        data = np.ones(num_low_seed, dtype=np.int32)
         row_ind = []
         col_ind = []
         for idx in low_prob_indices:
             row_ind.append(total_indices[0][idx])
             col_ind.append(total_indices[1][idx])
+        sparse_mat = csr_matrix((data, (row_ind, col_ind)), shape=att.shape, dtype=np.int32)
+        # get dense arr and dilate
+        dense_arr_low_obj = sparse_mat.toarray().astype(np.int32)
+        struct1 = generate_binary_structure(2, 2)
+        rand_iter = np.random.randint(0,30)
+        low_prob_obj_area = binary_dilation(dense_arr_low_obj, structure=struct1, iterations=rand_iter).astype(np.int32)
+        low_prob_obj_area = np.multiply(low_prob_obj_area, seg)
+        high_prob_obj_area = seg - low_prob_obj_area
+        # get indices of the low area and multiply by random float [0.0, 0.5]
+        low_prob_obj_area_indices = np.nonzero(low_prob_obj_area)
+        num_low_prob_obj_area = low_prob_obj_area_indices[0].shape[0]
+        data = np.float32(np.random.randint(0, 10, num_low_prob_obj_area)) / 100.0
+        row_ind = []
+        col_ind = []
+        for idx in range(num_low_prob_obj_area):
+            row_ind.append(low_prob_obj_area_indices[0][idx])
+            col_ind.append(low_prob_obj_area_indices[1][idx])
         sparse_mat = csr_matrix((data, (row_ind, col_ind)), shape=att.shape, dtype=np.float32)
-        dense_arr_low_obj = sparse_mat.toarray().astype(np.float32)
+        low_prob_obj_part = sparse_mat.toarray().astype(np.float32)
+        # get indices of the high area and multiply by random float [0.95, 1.0]
+        high_prob_obj_area_indices = np.nonzero(high_prob_obj_area)
+        num_high_prob_obj_area = high_prob_obj_area_indices[0].shape[0]
+        data = np.float32(np.random.randint(90, 100, num_high_prob_obj_area)) / 100.0
+        row_ind = []
+        col_ind = []
+        for idx in range(num_high_prob_obj_area):
+            row_ind.append(high_prob_obj_area_indices[0][idx])
+            col_ind.append(high_prob_obj_area_indices[1][idx])
+        sparse_mat = csr_matrix((data, (row_ind, col_ind)), shape=att.shape, dtype=np.float32)
+        high_prob_obj_part = sparse_mat.toarray().astype(np.float32)
+        obj_prob = low_prob_obj_part + high_prob_obj_part
     else:
-        dense_arr_low_obj = np.zeros(att.shape, np.float32)
-        high_prob_indices = range(num_total_indices)
-    data = np.float32(np.random.randint(500, 1000, len(high_prob_indices))) / 1000.0
-    row_ind = []
-    col_ind = []
-    for idx in high_prob_indices:
-        row_ind.append(total_indices[0][idx])
-        col_ind.append(total_indices[1][idx])
-    sparse_mat = csr_matrix((data, (row_ind, col_ind)), shape=att.shape, dtype=np.float32)
-    dense_arr_high_obj = sparse_mat.toarray().astype(np.float32)
-    obj_arr = dense_arr_low_obj + dense_arr_high_obj
+        data = np.float32(np.random.randint(90, 100, num_total_indices)) / 100.0
+        row_ind = []
+        col_ind = []
+        for idx in range(num_total_indices):
+            row_ind.append(total_indices[0][idx])
+            col_ind.append(total_indices[1][idx])
+        sparse_mat = csr_matrix((data, (row_ind, col_ind)), shape=att.shape, dtype=np.float32)
+        obj_prob = sparse_mat.toarray().astype(np.float32)
 
-    # generate confidence values in negative area, mostly < 0.5, a few >= 0.5 (up to 5%)
+    # generate confidence values in negative area, mostly < 0.1, a few >= 0.9 by choosing random seed an dilate
     nega_bool = np.equal(label_map, 1)
+    nega_arr = nega_bool.astype(np.int32)
     total_indices = np.nonzero(nega_bool)
     num_total_indices = total_indices[0].shape[0]
-    high_prob_portion = np.float32(np.random.randint(0, 6)) / 100.0
-    num_high_prob = np.int32(num_total_indices * high_prob_portion)  # number of pixels with high confidence
-    if num_high_prob != 0:
-        num_low_prob = num_total_indices - num_high_prob  # number of pixels with low confidence
-        high_prob_indices = np.random.choice(num_total_indices, num_high_prob)
-        low_prob_indices = np.random.choice(num_total_indices, num_low_prob)
-        data = np.float32(np.random.randint(500, 1000, high_prob_indices.size)) / 1000.0
+    num_high_seed = np.random.randint(0, 5)  # number of seed pixels with high confidence
+    if num_high_seed != 0:
+        high_prob_indices = np.random.choice(num_total_indices, num_high_seed)
+        data = np.ones(num_high_seed, dtype=np.int32)
         row_ind = []
         col_ind = []
         for idx in high_prob_indices:
             row_ind.append(total_indices[0][idx])
             col_ind.append(total_indices[1][idx])
+        sparse_mat = csr_matrix((data, (row_ind, col_ind)), shape=att.shape, dtype=np.int32)
+        # get dense arr and dilate
+        dense_arr_high_obj = sparse_mat.toarray().astype(np.int32)
+        struct1 = generate_binary_structure(2, 2)
+        rand_iter = np.random.randint(0,30)
+        high_prob_obj_area = binary_dilation(dense_arr_high_obj, structure=struct1, iterations=rand_iter).astype(np.int32)
+        high_prob_obj_area = np.multiply(high_prob_obj_area, nega_arr)
+        low_prob_obj_area = nega_arr - high_prob_obj_area
+        # get indices of the high area and multiply by random float [0.9, 1.0]
+        high_prob_obj_area_indices = np.nonzero(high_prob_obj_area)
+        num_high_prob_obj_area = high_prob_obj_area_indices[0].shape[0]
+        data = np.float32(np.random.randint(90, 100, num_high_prob_obj_area)) / 100.0
+        row_ind = []
+        col_ind = []
+        for idx in range(num_high_prob_obj_area):
+            row_ind.append(high_prob_obj_area_indices[0][idx])
+            col_ind.append(high_prob_obj_area_indices[1][idx])
         sparse_mat = csr_matrix((data, (row_ind, col_ind)), shape=att.shape, dtype=np.float32)
-        dense_arr_high_obj = sparse_mat.toarray().astype(np.float32)
+        high_prob_obj_part = sparse_mat.toarray().astype(np.float32)
+        # get indices of the low area and multiply by random float [0.0, 0.1]
+        low_prob_obj_area_indices = np.nonzero(low_prob_obj_area)
+        num_low_prob_obj_area = low_prob_obj_area_indices[0].shape[0]
+        data = np.float32(np.random.randint(0, 10, num_low_prob_obj_area)) / 100.0
+        row_ind = []
+        col_ind = []
+        for idx in range(num_low_prob_obj_area):
+            row_ind.append(low_prob_obj_area_indices[0][idx])
+            col_ind.append(low_prob_obj_area_indices[1][idx])
+        sparse_mat = csr_matrix((data, (row_ind, col_ind)), shape=att.shape, dtype=np.float32)
+        low_prob_obj_part = sparse_mat.toarray().astype(np.float32)
+        nega_prob = low_prob_obj_part + high_prob_obj_part
     else:
-        dense_arr_high_obj = np.zeros(att.shape, np.float32)
-        low_prob_indices = range(num_total_indices)
-    data = np.float32(np.random.randint(0, 500, len(low_prob_indices))) / 1000.0
-    row_ind = []
-    col_ind = []
-    for idx in low_prob_indices:
-        row_ind.append(total_indices[0][idx])
-        col_ind.append(total_indices[1][idx])
-    sparse_mat = csr_matrix((data, (row_ind, col_ind)), shape=att.shape, dtype=np.float32)
-    dense_arr_low_obj = sparse_mat.toarray().astype(np.float32)
-    nega_arr = dense_arr_low_obj + dense_arr_high_obj
+        data = np.float32(np.random.randint(0, 10, num_total_indices)) / 100.0
+        row_ind = []
+        col_ind = []
+        for idx in range(num_total_indices):
+            row_ind.append(total_indices[0][idx])
+            col_ind.append(total_indices[1][idx])
+        sparse_mat = csr_matrix((data, (row_ind, col_ind)), shape=att.shape, dtype=np.float32)
+        nega_prob = sparse_mat.toarray().astype(np.float32)
 
-    full_prob_map = obj_arr + nega_arr
-
-    if full_prob_map.shape != att.shape:
-        sys.exit('constructed prob_map {0} does not match att/seg image {1}'.format(full_prob_map.shape, att.shape))
-
-    full_prob_map = full_prob_map[..., np.newaxis]
-
-    return full_prob_map
+    full_prob_map = obj_prob + nega_prob
+    return full_prob_map[..., np.newaxis]
 
 
 def get_balance_weights(s0, s1, s2, s3):

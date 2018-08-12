@@ -31,9 +31,9 @@ with tf.device('/cpu:0'):
 
 # config train params
 params_model = {
-    'batch': 8, # feed 2 seqs, 4 frames for each seqs
+    'batch': 10, # feed 1 seqs, 10 frames for each seqs
     'l2_weight': 0.0002,
-    'init_lr': 1e-5, # original paper: 1e-8,
+    'init_lr': 5e-6, # 1e-5 for batch=2; original paper: 1e-8
     'data_format': 'NCHW', # optimal for cudnn
     'save_path': '../data/ckpts/attention_bin/CNN-part-gate-img-v6_lstm/att_bin.ckpt',
     'tsboard_logs': '../data/tsboard_logs/attention_bin/CNN-part-gate-img-v6_lstm',
@@ -44,10 +44,10 @@ params_model = {
 epochs = 100
 frames_per_seq = 100 # each seq is extended to 100 frames by padding previous frames inversely
 num_seq = 60
-steps_per_ep = int(num_seq * frames_per_seq / params_model['batch']) # 750 if batch=4*2
-total_steps = epochs * steps_per_ep # total steps of BP, 60000
+steps_per_ep = int(num_seq * frames_per_seq / params_model['batch']) # 600 if batch=10, 750 if batch=8
+total_steps = epochs * steps_per_ep # total steps of BP, 60000(batch=10), 75000(batch=8)
 global_step = tf.Variable(0, name='global_step', trainable=False) # incremented automatically by 1 after 1 BP
-save_ckpt_interval = 7500 # corresponds to 10 epoch
+save_ckpt_interval = 6000 # corresponds to 10 epoch
 summary_write_interval = 10
 print_screen_interval = 5
 
@@ -93,8 +93,8 @@ with tf.Session(config=config_gpu) as sess:
         # train steps for each epoch
         permute_list = mydata.permute_seq_order()
         for local_step in range(steps_per_ep):
-            # choose two seqs in the shuffle list, 4 frames per seq
-            imgs, segs, weights, atts, prob_maps, bbs = mydata.get_batch_sample(permute_list, local_step)
+            # choose one seqs in the shuffle list, 8 frames per seq
+            imgs, segs, weights, atts, prob_maps, bbs = mydata.get_batch1_sample(permute_list, local_step)
             if imgs is None:
                 continue
             #img, seg, weight, att = mydata.get_a_random_sample() # [1,h,w,3] float32, [1,h,w,1] int32, [1,h,w,1] float32

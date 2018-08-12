@@ -168,19 +168,20 @@ class ResNet():
         with tf.variable_scope('feat_update'):
             # get bbox from att box coordinates, assuming batch=8
             if training:
-                feats = [0] * 8
+                feats = [0] * 10
                 if self._data_format == 'NCHW':
                     concat_feat = tf.transpose(concat_feat, [0, 2, 3, 1])  # To [N, H, W, 64]
-                for i in range(8):
+                for i in range(10):
                     sub_feats = tf.image.crop_to_bounding_box(concat_feat[i:i+1,:,:,:], bb[i][0], bb[i][1], bb[i][2], bb[i][3])
                     sub_att = tf.image.crop_to_bounding_box(tf.cast(atts[i:i+1,:,:,:], tf.float32), bb[i][0], bb[i][1], bb[i][2], bb[i][3])
                     sub_conf = tf.image.crop_to_bounding_box(prob[i:i+1,:,:,:], bb[i][0], bb[i][1], bb[i][2], bb[i][3])
                     sub_att_feat = tf.multiply(sub_feats, sub_att)
                     sub_att_feat = tf.concat([sub_conf, sub_att_feat], axis=3) # [1, H, W, 65]
                     feats[i] = tf.image.resize_images(sub_att_feat, [256, 512])  # [1, 256, 512, 65]
-                # stack all boxed feats to batch=8
+                # stack all boxed feats to batch=10
                 stack_feats = tf.concat([feats[0], feats[1], feats[2], feats[3],
-                                         feats[4], feats[5], feats[6], feats[7]], axis=0) # [8, 256, 512, 65]
+                                         feats[4], feats[5], feats[6], feats[7],
+                                         feats[8], feats[9]], axis=0) # [10, 256, 512, 65]
             else: # in test mode, batch=1
                 if self._data_format == 'NCHW':
                     concat_feat = tf.transpose(concat_feat, [0, 2, 3, 1])  # To [1, H, W, 64]
@@ -190,6 +191,7 @@ class ResNet():
                 sub_att_feat = tf.multiply(sub_feat, sub_att)
                 sub_att_feat = tf.concat([sub_conf, sub_att_feat], axis=3)  # [1, H, W, 65]
                 stack_feats = tf.image.resize_images(sub_att_feat, [256, 512])  # [1, 256, 512, 65]
+                init_state_inf = stack_feats[:,:,:,1:65]
             if self._data_format == 'NCHW':
                 stack_feats = tf.transpose(stack_feats, [0, 3, 1, 2]) # [N, 65, H, W]
             # go through a conv 1x1 before lstm
@@ -200,7 +202,7 @@ class ResNet():
             # LSTM layer
             with tf.variable_scope('lstm_2d'):
                 if training:
-                    lstm_out = nn.lstm_conv2d_train(self._data_format, feat_fuse) # out: [8, 64, 256, 512] if NCHW
+                    lstm_out = nn.lstm_conv2d_train(self._data_format, feat_fuse) # out: [10, 64, 256, 512] if NCHW
                 else:
                     lstm_out, current_state, assign_state_ops = nn.lstm_conv2d_inf(self._data_format,
                                                                                    feat_fuse,
@@ -208,14 +210,15 @@ class ResNet():
                     # lstm out: [1, 64, 256, 512] if NCHW, state_tuple: ([1,256,512,64], [1,256,512,64])
             # resize all bbox to original size and pad to image size
             if training:
-                full_feats = [0] * 8
+                full_feats = [0] * 10
                 if self._data_format == 'NCHW':
                     lstm_out = tf.transpose(lstm_out, [0, 2, 3, 1]) # to [8, 256, 512, 64]
-                for i in range(8):
+                for i in range(10):
                     full_feat = tf.image.resize_images(lstm_out[i:i+1,:,:,:], [bb[i][2], bb[i][3]]) # to bbox original size
                     full_feats[i] = tf.image.pad_to_bounding_box(full_feat, bb[i][0], bb[i][1], im_size[1], im_size[2]) # to input image size
                 stack_full_feats = tf.concat([full_feats[0], full_feats[1], full_feats[2], full_feats[3],
-                                              full_feats[4], full_feats[5], full_feats[6], full_feats[7]], axis=0)
+                                              full_feats[4], full_feats[5], full_feats[6], full_feats[7],
+                                              full_feats[8], full_feats[9]], axis=0)
             else: # in test mode, batch=1
                 if self._data_format == 'NCHW':
                     lstm_out = tf.transpose(lstm_out, [0, 2, 3, 1]) # to [8, 256, 512, 64]
@@ -233,7 +236,10 @@ class ResNet():
                 seg_out = nn.conv_layer(self._data_format, feat_after_lstm, 1, 'SAME', [1, 1, 64, 2], training)
                 seg_out = nn.bias_layer(self._data_format, seg_out, 2, training)
 
-        return seg_out, init_out, current_state, assign_state_ops
+        if training:
+            return seg_out
+        else:
+            return seg_out, init_out, current_state, assign_state_ops, init_state_inf
 
     def _att_gate(self, images, atts):
         '''
@@ -276,7 +282,7 @@ class ResNet():
         :return: total_loss, bp_step
         '''
 
-        seg_out, _, _, _ = self._build_model(feed_img, feed_att, feed_prob, bb, True) # original image size
+        seg_out = self._build_model(feed_img, feed_att, feed_prob, bb, True) # original image size
         total_loss = self._seg_loss(seg_out, feed_seg, feed_weight, feed_att) \
                      + self._l2_loss()
         tf.summary.scalar('total_loss', total_loss)
@@ -303,7 +309,7 @@ class ResNet():
             - 1st forward pass run: init_prob_map, init_seg_mask
             - 2nd forward pass run: 1) assign_state_ops, 2) final_seg_mask, current_state
         '''
-        final_out, init_out, current_state, assign_state_ops = self._build_model(feed_img, feed_att, feed_prob, feed_bb, False, feed_state)
+        final_out, init_out, current_state, assign_state_ops, init_lstm_inf = self._build_model(feed_img, feed_att, feed_prob, feed_bb, False, feed_state)
 
         # process init_out
         if self._data_format == "NCHW":
@@ -318,7 +324,7 @@ class ResNet():
         final_seg_mask = tf.argmax(final_prob_map, axis=3, output_type=tf.int32)  # [1, H, W]
 
 
-        return init_prob_map[:,:,:,1:], init_seg_mask, final_seg_mask, assign_state_ops, current_state
+        return init_prob_map[:,:,:,1:], init_seg_mask, final_seg_mask, assign_state_ops, current_state, init_lstm_inf
 
     def _optimize(self, loss, acc_count, global_step):
         '''

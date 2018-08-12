@@ -22,7 +22,8 @@ def lstm_conv2d_train(data_format, input_tensor):
     if data_format == "NCHW":
         input_tensor = tf.transpose(input_tensor, [0,2,3,1]) # To NHWC
     ker_shape = [3, 3]
-    lstm_in = tf.stack([input_tensor[0:4,:,:,:], input_tensor[4:8,:,:,:]], axis=0) # [2, 4, 256, 512, 65] [batch, max_time, h, w, c]
+    lstm_in = tf.expand_dims(input_tensor, 0) #  [1, 10, 256, 512, 65] [batch, max_time, h, w, c]
+    # lstm_in = tf.stack([input_tensor[0:4,:,:,:], input_tensor[4:8,:,:,:]], axis=0) # [2, 4, 256, 512, 65] [batch, max_time, h, w, c]
     lstm_cell = tf.contrib.rnn.Conv2DLSTMCell(input_shape=[256, 512, 65],
                                               output_channels=64,
                                               kernel_shape=ker_shape,
@@ -31,16 +32,18 @@ def lstm_conv2d_train(data_format, input_tensor):
                                               forget_bias=1.0,  # default
                                               initializers=None,    # default
                                               name='conv2dlstm')
-    zero_state = lstm_cell.zero_state(batch_size=2, dtype=tf.float32)
-    #input_tensor = tf.reshape(input_tensor, [1,2,30,56,128])
+    zero_state = lstm_cell.zero_state(batch_size=1, dtype=tf.float32)
+    # zero_state = lstm_cell.zero_state(batch_size=2, dtype=tf.float32)
     lstm_out, final_state = tf.nn.dynamic_rnn(cell=lstm_cell,
                                               inputs=lstm_in,
-                                              sequence_length=[4,4],
+                                              sequence_length=[10], #[4,4],
                                               initial_state=zero_state,
                                               dtype=tf.float32,
                                               swap_memory=True)
-    # lstm_out has shape: [2,4,256,512,65], must restore shape of [8, 256, 512, 64]
-    lstm_out = tf.concat([tf.squeeze(lstm_out[0:1,:,:,:,:]), tf.squeeze(lstm_out[1:2,:,:,:,:])], axis=0)
+    # lstm_out has shape: [1,10,256,512,65], must restore shape of [10, 256, 512, 64]
+    lstm_out = tf.squeeze(lstm_out, 0)
+    # # lstm_out has shape: [2,4,256,512,65], must restore shape of [8, 256, 512, 64]
+    # lstm_out = tf.concat([tf.squeeze(lstm_out[0:1,:,:,:,:]), tf.squeeze(lstm_out[1:2,:,:,:,:])], axis=0)
     # change back to required data_format
     if data_format == "NCHW":
         lstm_out = tf.transpose(lstm_out, [0,3,1,2])
@@ -330,19 +333,19 @@ def get_lstm_var():
 
     lstm_dict = {}
     # for conv before lstm
-    with tf.variable_scope('feat_update/conv_in_lstm'):
+    with tf.variable_scope('feat_update/conv_in_lstm', reuse=True):
         lstm_dict['feat_update/conv_in_lstm/bias'] = tf.get_variable('bias')
         lstm_dict['feat_update/conv_in_lstm/kernel'] = tf.get_variable('kernel')
 
     # for lstm weights
-    with tf.variable_scope('feat_update/lstm_2d/rnn/conv2dlstm'):
-        lstm_dict['feat_update/conv_in_lstm/bias'] = tf.get_variable('bias')
-        lstm_dict['feat_update/conv_in_lstm/kernel'] = tf.get_variable('kernel')
-
-    # for conv after lstm
-    with tf.variable_scope('feat_update/conv_out_lstm'):
+    with tf.variable_scope('feat_update/lstm_2d/rnn/conv2dlstm', reuse=True):
         lstm_dict['feat_update/lstm_2d/rnn/conv2dlstm/biases'] = tf.get_variable('biases')
         lstm_dict['feat_update/lstm_2d/rnn/conv2dlstm/kernel'] = tf.get_variable('kernel')
+
+    # for conv after lstm
+    with tf.variable_scope('feat_update/conv_out_lstm', reuse=True):
+        lstm_dict['feat_update/conv_out_lstm/bias'] = tf.get_variable('bias')
+        lstm_dict['feat_update/conv_out_lstm/kernel'] = tf.get_variable('kernel')
 
     # for the cls layer
     with tf.variable_scope('feat_update/conv_cls', reuse=True):
