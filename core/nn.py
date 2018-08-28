@@ -109,11 +109,6 @@ def ReLu_layer(input_tensor):
     return relu_out
 
 
-def get_conv_transpose_ksize(factor):
-    # Input: specify upsampling factor
-    return 2 * factor - factor % 2
-
-
 def bias_layer(data_format, input_tensor, shape=None):
 
     scope_name = tf.get_variable_scope().name
@@ -208,9 +203,6 @@ def param_lr():
     vars_lr['main/B4_2/conv1/kernel'] = 1.0
     vars_lr['main/B4_2/conv2/kernel'] = 1.0
 
-    vars_lr['main/feat_reduce/conv/kernel'] = 1.0
-    vars_lr['main/feat_reduce/bias/bias'] = 2.0
-
     vars_lr['main/B1_side_path/kernel'] = 1.0
     vars_lr['main/B1_side_path/bias'] = 2.0
     vars_lr['main/B2_side_path/kernel'] = 1.0
@@ -219,8 +211,6 @@ def param_lr():
     vars_lr['main/B3_side_path/bias'] = 2.0
     vars_lr['main/B4_side_path/kernel'] = 1.0
     vars_lr['main/B4_side_path/bias'] = 2.0
-    vars_lr['main/resize_side_path/kernel'] = 1.0
-    vars_lr['main/resize_side_path/bias'] = 2.0
 
     vars_lr['main/fuse/kernel'] = 0.01
     vars_lr['main/fuse/bias'] = 0.02

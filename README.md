@@ -25,7 +25,7 @@ Train full-sized images (batch=4) seq by seq only using CNN part (including feat
     * Mean J: 0.70597
     * Mean F: 0.71415
     
-## Training (include feat reduce) - No BN, random feed
+## Suspended (include feat reduce) - No BN, random feed
 * Weight init from ResNet-38 ILSVRC-ImageNet
 * Data mean/std from Implementation of ResNet-38
 * Optimizer: Adam
@@ -46,6 +46,16 @@ Train full-sized images (batch=4) seq by seq only using CNN part (including feat
 * Supervison: No
 * More details, see the code
 
+## Training (no feat reduce) - No BN, random feed
+* Weight init from ResNet-38 ILSVRC-ImageNet
+* Data mean/std from Implementation of ResNet-38
+* Optimizer: Adam
+* Gradient accumulate of 10
+* lr: 1e-5
+* 100 epochs, batch=1
+* resize (0.6-1.0)/flip
+* feed out of order, each obj in each seq is an individual training sample, no pad to a fix seq len
+* Result
 
 
 ## TO be fine-tuned:
