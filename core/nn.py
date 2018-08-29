@@ -208,9 +208,6 @@ def param_lr():
     vars_lr['main/B4_2/conv1/kernel'] = 1.0
     vars_lr['main/B4_2/conv2/kernel'] = 1.0
 
-    vars_lr['main/feat_reduce/conv/kernel'] = 1.0
-    vars_lr['main/feat_reduce/bias/bias'] = 2.0
-
     vars_lr['main/B1_side_path/kernel'] = 1.0
     vars_lr['main/B1_side_path/bias'] = 2.0
     vars_lr['main/B2_side_path/kernel'] = 1.0
@@ -219,8 +216,6 @@ def param_lr():
     vars_lr['main/B3_side_path/bias'] = 2.0
     vars_lr['main/B4_side_path/kernel'] = 1.0
     vars_lr['main/B4_side_path/bias'] = 2.0
-    vars_lr['main/resize_side_path/kernel'] = 1.0
-    vars_lr['main/resize_side_path/bias'] = 2.0
 
     vars_lr['main/fuse/kernel'] = 0.01
     vars_lr['main/fuse/bias'] = 0.02

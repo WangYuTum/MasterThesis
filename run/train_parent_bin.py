@@ -17,7 +17,7 @@ from core import resnet
 from core.nn import get_imgnet_var
 
 # config device
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 config_gpu = tf.ConfigProto()
 config_gpu.gpu_options.allow_growth = True
 
@@ -42,14 +42,14 @@ params_model = {
 }
 # define epochs
 epochs = 100
-frames_per_seq = 100 # each seq is extended to 100 frames by padding previous frames inversely
-steps_per_seq = 10 # because accumulate gradients 10 times before BP
+frames_per_seq = 200 # assume each seq has 200 samples
+steps_per_seq = 20 # because accumulate gradients 10 times before BP
 num_seq = 60
-steps_per_ep = num_seq * steps_per_seq
+steps_per_ep = num_seq * steps_per_seq # 1200
 acc_count = 10 # accumulate 10 gradients
 total_steps = epochs * steps_per_ep # total steps of BP, 60000
 global_step = tf.Variable(0, name='global_step', trainable=False) # incremented automatically by 1 after 1 BP
-save_ckpt_interval = 12000 # corresponds to 20 epoch
+save_ckpt_interval = 12000 # corresponds to 10 epoch
 summary_write_interval = 50
 print_screen_interval = 20
 

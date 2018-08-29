@@ -124,25 +124,12 @@ class DAVIS_dataset():
                 frame_gt_path = frame_gt_path.replace('jpg', 'png')
                 frame_gt = np.array(Image.open(frame_gt_path)).astype(np.uint8)
                 # convert to binary
-                gt_bool = np.greater(frame_gt, 0)
-                gt_bin = gt_bool.astype(np.uint8)
-                seq_imgs.append(frame_img)
-                seq_gts.append(gt_bin)
-            # go several rounds to fill up the required length
-            max_round = int(self._max_train_len / self._min_train_len) # 100 / 25 = 5 for train seqs
-            break_round = 0
-            for _ in range(max_round):
-                if break_round == 1: # if no further round required, break
-                    break
-                else:
-                    start_base = len(seq_imgs) - 2
-                for in_idx in range(num_frames-1):
-                    if len(seq_imgs) == self._max_train_len:
-                        break_round = 1
-                        break
-                    else:
-                        seq_imgs.append(seq_imgs[start_base-in_idx])
-                        seq_gts.append(seq_gts[start_base-in_idx])
+                num_objs = np.amax(frame_gt)
+                for idx_obj in range(num_objs):
+                    gt_bool = np.equal(frame_gt, idx_obj + 1)
+                    gt_bin = gt_bool.astype(np.uint8)
+                    seq_imgs.append(frame_img)
+                    seq_gts.append(gt_bin)
             print('After, {} frames for seq {}'.format(len(seq_imgs), seq_idx))
             train_imgs.append(seq_imgs)
             train_gts.append(seq_gts)
@@ -156,7 +143,8 @@ class DAVIS_dataset():
 
         # choose an image randomly
         seq_imgs, seq_gts = self.get_random_seq() # [img0, img1, ...], [seq0, seq1, ...], both np.uint8
-        rand_frame_idx = np.random.permutation(self._permut_range_frame)[0]
+        num_frames = len(seq_imgs)
+        rand_frame_idx = np.random.permutation(num_frames)[0]
         img = seq_imgs[rand_frame_idx] # [h, w, 3], np.uint8
         seg = seq_gts[rand_frame_idx] # [h,w], np.uint8
 
