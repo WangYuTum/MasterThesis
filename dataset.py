@@ -36,6 +36,8 @@ import glob
 from scipy.ndimage.morphology import binary_dilation
 from scipy.ndimage import generate_binary_structure
 from scipy.misc import imsave
+from PIL import ImageFilter
+from scipy.sparse import csr_matrix
 from skimage.transform import resize
 from scipy.misc import toimage
 from scipy.misc import imread
@@ -310,10 +312,44 @@ class DAVIS_dataset():
             gt_bin = gt_bool.astype(np.uint8) # [h,w], np.uint8
             struct1 = generate_binary_structure(2, 2)
             att = binary_dilation(gt_bin, structure=struct1, iterations=30).astype(gt_bin.dtype)
+            ### att shape var
+            # att_obj = Image.fromarray(att)
+            # edge_obj = att_obj.filter(ImageFilter.FIND_EDGES)
+            # rand_shape_arr = self.get_rand_att_from_edge(edge_obj, 10, 30)
+            # att = att + rand_shape_arr
+            # att_bool = np.greater(att, 0)
+            # att = att_bool.astype(np.int32)[..., np.newaxis]  # [h, w, 1], np.int32
+            ###
             att = att.astype(np.int32)[..., np.newaxis]  # [h, w, 1], np.int32
             frame_pair.append([frame_list[i], att])
 
         return frame_pair
+
+    def get_rand_att_from_edge(self, edge_obj, num_edge_points_max, dilate_max):
+
+        edge_arr = np.array(edge_obj, np.uint8)
+        true_indices = np.nonzero(edge_arr)
+        num_rand_shape = np.random.randint(0, num_edge_points_max + 1)
+        num_true = true_indices[0].shape[0]
+        if num_true == 0:
+            return np.zeros(edge_arr.shape, np.uint8)
+        else:
+            rand_indices = np.random.choice(num_true, num_rand_shape)
+        if rand_indices.size != 0:
+            data = np.ones(rand_indices.size, np.uint8)
+            row_ind = []
+            col_ind = []
+            for idx in rand_indices:
+                row_ind.append(true_indices[0][idx])
+                col_ind.append(true_indices[1][idx])
+            sparse_mat = csr_matrix((data, (row_ind, col_ind)), shape=edge_arr.shape, dtype=np.uint8)
+            sparse_arr = sparse_mat.toarray().astype(np.uint8)
+            struct1 = generate_binary_structure(2, 2)
+            size_att = np.random.randint(9, dilate_max+1)
+            rand_shape_arr = binary_dilation(sparse_arr, structure=struct1, iterations=size_att).astype(sparse_arr.dtype)
+            return rand_shape_arr
+        else:
+            return np.zeros(edge_arr.shape, np.uint8)
 
 #     Pre-processing(called in train script):
 #        (done)- Convert np.uint8 to proper datatype(np.float32 for imgs, np.int32 for gts)

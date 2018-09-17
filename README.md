@@ -43,7 +43,13 @@ Train full-sized images (batch=4) seq by seq only using CNN part (including feat
     in another new branch where size of the attention area is randomized.
 
 ## Re-training use previous configurations (fixed attention size), visualize activitations.
- 
+ * Best Test on val set so far (fine-tune, 500 iters, lr=1e-6)
+   * Mean J: 0.86032
+   * Mean F: 0.90682
+ * Conclusion:
+    * Not pure appearance model, att size(boundary effect), position(shift effect) and
+    shape(random false att) play very important prior/constraints.
+    Therefore, using attention does not provide advantage over appearance model.
 
 ## TODO
 * Feed seq by seq without BN (major)
