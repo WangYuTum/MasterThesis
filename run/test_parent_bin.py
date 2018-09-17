@@ -9,6 +9,20 @@ sys.path.append("..")
 from dataset import DAVIS_dataset
 from core import resnet
 from scipy.misc import imsave
+import glob
+from PIL import Image
+
+def overlay_seg_rgb(seg_arr, rgb_obj):
+
+    seg_arr = seg_arr.astype(np.uint8)
+    img_palette = np.array([0, 0, 0, 150, 0, 0])
+    seg_color = Image.fromarray(seg_arr, mode='P')
+    seg_color.putpalette(img_palette)
+    overlay_mask = Image.fromarray(seg_arr * 150, mode='L')
+
+    com_img = Image.composite(seg_color, rgb_obj, overlay_mask)
+
+    return com_img
 
 # parse argument
 arg_fine_tune = int(sys.argv[1])
@@ -70,7 +84,7 @@ if FINE_TUNE == 1:
         'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-full-img/noBN/att_bin.ckpt-60000'
     }
     global_iters = 1000 # original paper: 500
-    save_ckpt_interval = 500
+    save_ckpt_interval = 100
     summary_write_interval = 10
     print_screen_interval = 10
     acc_count = 1
@@ -81,8 +95,9 @@ else:
         'batch': 1,
         'data_format': 'NCHW',  # optimal for cudnn
         #'restore_fine-tune_bin': '../data/ckpts/attention_bin/CNN-part-full-img/att_bin.ckpt-90000',
-        'restore_fine-tune_bin': '../data/ckpts/fine-tune/attention_bin/CNN-part-full-img/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt-61000',
-        'save_result_path': '../data/results/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]
+        'restore_fine-tune_bin': '../data/ckpts/fine-tune/attention_bin/CNN-part-full-img/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt-60500',
+        'save_result_path': '../data/results/iter500/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1],
+        'seg_rgb_overlay': '../data/results/overlaid/flow-to-att-to-seg_rgb/' + val_seq_paths[FINE_TUNE_seq].split('/')[-1]
     }
 
 # display on tsboard only during fine-tuning
@@ -98,7 +113,7 @@ if FINE_TUNE == 1:
     init_op = tf.global_variables_initializer()
     sum_all = tf.summary.merge_all()
     # define Saver
-    saver_fine_tune = tf.train.Saver()
+    saver_fine_tune = tf.train.Saver(max_to_keep=11)
 else:
     prob_map, mask = model.test(feed_img) # prob_map: [1,H,W] tf.float32, mask: [1,H,W] tf.int16
     init_op = tf.global_variables_initializer()
@@ -154,8 +169,13 @@ with tf.Session(config=config_gpu) as sess:
 
     else:
         print("Starting inference for {}".format(val_seq_paths[FINE_TUNE_seq].split('/')[-1]))
+        # Get image lists of the current sequence
+        img_search = os.path.join(val_seq_paths[FINE_TUNE_seq], '*.jpg')
+        img_files = glob.glob(img_search)
+        img_files.sort()
         for test_idx in range(len(test_frames)):
             print("Inference on frame {}".format(test_idx+1))
+            rgb_obj = Image.open(img_files[test_idx + 1])
             feed_dict_v = {feed_img: test_frames[test_idx][np.newaxis,:]}
             # prob_map: [1,H,W] tf.float32, mask: [1,H,W] tf.int16
             prob_map_, mask_ = sess.run([prob_map, mask], feed_dict=feed_dict_v)
@@ -163,8 +183,10 @@ with tf.Session(config=config_gpu) as sess:
             save_path = params_model['save_result_path'] + '/' + save_name
             # save binary mask
             imsave(save_path, np.squeeze(mask_))
-            # save prob map
-            # imsave(save_path.replace('.png', '_prob.png'), np.squeeze(prob_map_))
+            # Save seg overlay rgb
+            save_seg_rgb_path = params_model['seg_rgb_overlay'] + '/' + save_name
+            seg_rgb = overlay_seg_rgb(np.squeeze(mask_), rgb_obj)
+            seg_rgb.save(save_seg_rgb_path)
             print("Saved result.")
         print("Finished inference.")
 
