@@ -34,7 +34,7 @@ FINE_TUNE = arg_fine_tune
 FINE_TUNE_seq = arg_fine_tune_seq # max 30
 
 # config device
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 config_gpu = tf.ConfigProto()
 config_gpu.gpu_options.allow_growth = True
 #config_gpu.gpu_options.per_process_gpu_memory_fraction = 0.6
@@ -81,7 +81,7 @@ if FINE_TUNE == 1:
         'data_format': 'NCHW', # optimal for cudnn
         'save_path': '../data/ckpts/fine-tune/attention_bin/CNN-part-full-img/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt',
         'tsboard_logs': '../data/tsboard_logs/fine-tune/attention_bin/CNN-part-full-img/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1],
-        'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-full-img/noBN/att_bin.ckpt-60000'
+        'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-full-img/noBN/att_bin.ckpt-84000'
     }
     global_iters = 1000 # original paper: 500
     save_ckpt_interval = 100
@@ -95,7 +95,7 @@ else:
         'batch': 1,
         'data_format': 'NCHW',  # optimal for cudnn
         #'restore_fine-tune_bin': '../data/ckpts/attention_bin/CNN-part-full-img/att_bin.ckpt-90000',
-        'restore_fine-tune_bin': '../data/ckpts/fine-tune/attention_bin/CNN-part-full-img/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt-60500',
+        'restore_fine-tune_bin': '../data/ckpts/fine-tune/attention_bin/CNN-part-full-img/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt-84800',
         'save_result_path': '../data/results/iter500/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1],
         'seg_rgb_overlay': '../data/results/overlaid/flow-to-att-to-seg_rgb/' + val_seq_paths[FINE_TUNE_seq].split('/')[-1]
     }
