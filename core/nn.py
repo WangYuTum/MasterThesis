@@ -131,9 +131,9 @@ def get_imgnet_var():
 
     ## Imgnet weights variables
     imgnet_dict = {}
-    # for the first conv
-    with tf.variable_scope('main/B0', reuse=True):
-        imgnet_dict['main/B0/kernel'] = tf.get_variable('kernel')
+    # for the first conv, dont use since input is now 3(rgb)+2(OF) channels
+    # with tf.variable_scope('main/B0', reuse=True):
+    #     imgnet_dict['main/B0/kernel'] = tf.get_variable('kernel')
     # for all resnet side convs
     for i in range(4):
         with tf.variable_scope('main/B' + str(i + 1) + '_0/side', reuse=True):

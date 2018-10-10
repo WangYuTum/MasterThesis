@@ -44,7 +44,7 @@ class ResNet():
 
         ## The following 'main' scope is the primary (shared) feature layers, downsampling 16x
         shape_dict = {}
-        shape_dict['B0'] = [3,3,3,64]
+        shape_dict['B0'] = [3,3,5,64]
 
         with tf.variable_scope('main'):
             # Residual Block B0

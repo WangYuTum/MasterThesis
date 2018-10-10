@@ -35,10 +35,10 @@ params_model = {
     'l2_weight': 0.0002,
     'init_lr': 1e-5, # original paper: 1e-8,
     'data_format': 'NCHW', # optimal for cudnn
-    'save_path': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large/att_bin.ckpt',
-    'tsboard_logs': '../data/tsboard_logs/attention_bin/CNN-part-gate-img-v4_large',
+    'save_path': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large_Flowin/att_bin.ckpt',
+    'tsboard_logs': '../data/tsboard_logs/attention_bin/CNN-part-gate-img-v4_large_Flowin',
     'restore_imgnet': '../data/ckpts/imgnet.ckpt', # restore model from where
-    'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large/att_bin.ckpt-xxx'
+    'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large_Flowin/att_bin.ckpt-xxx'
 }
 # define epochs
 epochs = 100
@@ -54,13 +54,13 @@ summary_write_interval = 50
 print_screen_interval = 20
 
 # define placeholders
-feed_img = tf.placeholder(tf.float32, (params_model['batch'], None, None, 3))
+feed_img = tf.placeholder(tf.float32, (params_model['batch'], None, None, 5)) # 3(rgb)+2(of)
 feed_seg = tf.placeholder(tf.int32, (params_model['batch'], None, None, 1))
 feed_weight = tf.placeholder(tf.float32, (params_model['batch'], None, None, 1))
 feed_att = tf.placeholder(tf.int32, (params_model['batch'], None, None, 1))
 
 # display
-sum_img = tf.summary.image('img', feed_img)
+sum_img = tf.summary.image('img', feed_img[:,:,:,0:3])
 sum_seg = tf.summary.image('seg', tf.cast(feed_seg, tf.float16))
 sum_w = tf.summary.image('weight', feed_weight)
 sum_att = tf.summary.image('att', tf.cast(feed_att, tf.float16))

@@ -37,10 +37,12 @@ import glob
 from scipy.ndimage.morphology import binary_dilation
 from scipy.ndimage import generate_binary_structure
 from scipy.misc import imsave
+from scipy.misc import imresize
 from scipy.sparse import csr_matrix
 
 data_mean = np.array([0.485, 0.456, 0.406]).reshape((1,1,3)).astype(np.float32) # the ILSVRC mean, in rgb
 data_std = np.array([0.229, 0.224, 0.225]).reshape((1,1,3)).astype(np.float32) # the ILSVRC std, in rgb
+TAG_FLOAT = 202021.25
 
 class DAVIS_dataset():
     def __init__(self, params):
@@ -68,7 +70,7 @@ class DAVIS_dataset():
             if self._seq_set is None:
                 sys.exit('Must specify a set in txt format.')
             self._seq_paths = self._load_seq_path()
-            self._train_imgs, self._train_gts = self._get_train_data()
+            self._train_imgs, self._train_gts, self._train_ofs = self._get_train_data()
             # check length
             if len(self._train_imgs) != len(self._train_gts) or len(self._train_imgs) == 0:
                 sys.exit('Train imgs/gts length do not match.')
@@ -100,16 +102,19 @@ class DAVIS_dataset():
 
     def _get_train_data(self):
 
+        # drop the last frame since on OF can be computed.
         train_imgs = []
         train_gts = []
+        train_ofs = []
         num_seq = len(self._seq_paths)
         for seq_idx in range(num_seq):
             seq_imgs = []
             seq_gts = []
+            seq_of = []
             search_seq_imgs = os.path.join(self._seq_paths[seq_idx], "*.jpg")
             files_seq = glob.glob(search_seq_imgs)
             files_seq.sort()
-            num_frames = len(files_seq)
+            num_frames = len(files_seq) - 1
             print('{} frames for seq {}'.format(num_frames, seq_idx))
             if num_frames == 0:
                 sys.exit("Got no frames for seq {}".format(self._seq_paths[seq_idx]))
@@ -117,12 +122,19 @@ class DAVIS_dataset():
                 frame_img = np.array(Image.open(files_seq[i])).astype(np.uint8)
                 frame_gt_path = files_seq[i].replace('JPEGImages', 'Annotations')
                 frame_gt_path = frame_gt_path.replace('jpg', 'png')
+                frame_of_path = files_seq[i].replace('JPEGImages', 'Flow')
+                frame_of_path = frame_of_path.replace('jpg', 'flo')
                 frame_gt = np.array(Image.open(frame_gt_path)).astype(np.uint8)
-                # convert to binary
+                # convert gt seg to binary
                 gt_bool = np.greater(frame_gt, 0)
                 gt_bin = gt_bool.astype(np.uint8)
                 seq_imgs.append(frame_img)
                 seq_gts.append(gt_bin)
+                # convert OF to float32
+                OF = read_flow(frame_of_path)
+                if OF.shape[2] != 2:
+                    print('OF read err.')
+                seq_of.append(OF)
             # go several rounds to fill up the required length
             max_round = int(self._max_train_len / self._min_train_len) # 100 / 25 = 5 for train seqs
             break_round = 0
@@ -138,11 +150,13 @@ class DAVIS_dataset():
                     else:
                         seq_imgs.append(seq_imgs[start_base-in_idx])
                         seq_gts.append(seq_gts[start_base-in_idx])
+                        seq_of.append(seq_of[start_base-in_idx])
             print('After, {} frames for seq {}'.format(len(seq_imgs), seq_idx))
             train_imgs.append(seq_imgs)
             train_gts.append(seq_gts)
+            train_ofs.append(seq_of)
 
-        return train_imgs, train_gts
+        return train_imgs, train_gts, train_ofs
 
     def get_a_random_sample(self):
         '''
@@ -150,14 +164,17 @@ class DAVIS_dataset():
         '''
 
         # choose an image randomly
-        seq_imgs, seq_gts = self.get_random_seq() # [img0, img1, ...], [seq0, seq1, ...], both np.uint8
+        seq_imgs, seq_gts, seq_ofs = self.get_random_seq() # [img0, img1, ...], [seq0, seq1, ...], both np.uint8
         rand_frame_idx = np.random.permutation(self._permut_range_frame)[0]
         img = seq_imgs[rand_frame_idx] # [h, w, 3], np.uint8
         seg = seq_gts[rand_frame_idx] # [h,w], np.uint8
+        of = seq_ofs[rand_frame_idx] # [h,w,2], np.float32
 
         # random resize/flip
         stacked = np.concatenate((img, seg[..., np.newaxis]), axis=-1) # [h, w, 4]
         if get_flip_bool():
+            of = np.fliplr(of)
+            of = np.concatenate((-of[:,:,0:1], of[:,:,1:2]), axis=-1)
             stacked = np.fliplr(stacked)
         img_H = np.shape(img)[0]
         img_W = np.shape(img)[1]
@@ -172,6 +189,10 @@ class DAVIS_dataset():
         seg_obj = Image.fromarray(np.squeeze(stacked[:, :, 3:4]), mode='L')
         seg_obj = seg_obj.resize((new_W, new_H), Image.NEAREST)
         seg = np.array(seg_obj, seg.dtype)[..., np.newaxis] # [h, w, 1], np.uint8
+
+        of0 = imresize(np.squeeze(of[:, :, 0:1]), (new_H, new_W), mode='F')
+        of1 = imresize(np.squeeze(of[:, :, 1:2]), (new_H, new_W), mode='F')
+        of = np.stack((of0, of1),axis=-1)
 
         # Generate attention area, size is randomized, plus randomized shift
         size_att = np.random.randint(9, 36)
@@ -216,11 +237,15 @@ class DAVIS_dataset():
 
         # reshape
         img = img[np.newaxis, ...]
+        of = of[np.newaxis, ...]
         seg = seg[np.newaxis, ...]
         weight = weight[np.newaxis, ...]
         att = att[np.newaxis, ...]
 
-        return img, seg, weight, att
+        # concat img & of
+        img_of = np.concatenate((img, of),axis=-1)
+
+        return img_of, seg, weight, att
 
     def get_rand_att_from_edge(self, edge_obj, num_edge_points_max, dilate_max):
 
@@ -310,8 +335,9 @@ class DAVIS_dataset():
         rand_seq_idx = self._get_random_seq_idx()
         seq_imgs = self._train_imgs[rand_seq_idx] # list: [img0, img1, ...]
         seq_gts = self._train_gts[rand_seq_idx] # list: [gt0, gt1, ...]
+        seq_ofs = self._train_ofs[rand_seq_idx] # list: [of0, of1, ...]
 
-        return seq_imgs, seq_gts
+        return seq_imgs, seq_gts, seq_ofs
 
     def get_one_shot_pair(self):
         '''
@@ -432,6 +458,24 @@ class DAVIS_dataset():
 #        (done)- Randomly resize/flip must be done sequence-wise
 #        (done)- Subtract mean and divide var for images
 #        (done) - Dilate gts to get attention map
+
+def read_flow(file):
+
+    assert type(file) is str, "file is not str %r" % str(file)
+    assert os.path.isfile(file) is True, "file does not exist %r" % str(file)
+    assert file[-4:] == '.flo', "file ending is not .flo %r" % file[-4:]
+    f = open(file,'rb')
+    flo_number = np.fromfile(f, np.float32, count=1)[0]
+    assert flo_number == TAG_FLOAT, 'Flow number %r incorrect. Invalid .flo file' % flo_number
+    w = np.fromfile(f, np.int32, count=1)
+    h = np.fromfile(f, np.int32, count=1)
+    #if error try: data = np.fromfile(f, np.float32, count=2*w[0]*h[0])
+    data = np.fromfile(f, np.float32, count=2*w*h)
+    # Reshape data into 3D array (columns, rows, bands)
+    flow = np.resize(data, (int(h), int(w), 2))
+    f.close()
+
+    return flow
 
 
 def standardize(f0, f1, f2, f3, s0, s1, s2, s3):
