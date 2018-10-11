@@ -28,10 +28,10 @@ class ResNet():
         if self._data_format is not "NCHW" and self._data_format is not "NHWC":
             sys.exit("Invalid data format. Must be either 'NCHW' or 'NHWC'.")
 
-    def _build_model(self, images, atts):
+    def _build_model(self, images):
         '''
         :param images: [1,H,W,3], tf.float32
-        :return: segmentation output before softmax
+        :return: motion segmentation output before softmax
         '''
         model = {}
 
@@ -39,12 +39,9 @@ class ResNet():
         if self._data_format == "NCHW":
             images = tf.transpose(images, [0,3,1,2])    # [N,C,H,W]
 
-        ## attention gating on raw images, assuming batch=1
-        images = self._att_gate(images, atts)
-
         ## The following 'main' scope is the primary (shared) feature layers, downsampling 16x
         shape_dict = {}
-        shape_dict['B0'] = [3,3,5,64]
+        shape_dict['B0'] = [3,3,2,64]
 
         with tf.variable_scope('main'):
             # Residual Block B0
@@ -79,36 +76,11 @@ class ResNet():
                     model['B2_' + str(i + 1)] = nn.res(self._data_format, model['B2_' + str(i)],
                                                        shape_dict['B2']['convs'])
 
-            # Pooling 3
-            model['B2_2_pooled'] = nn.max_pool2d(self._data_format, model['B2_2'], 2, 'SAME')
-
-            # Residual Block B3_0 - B3_5
-            shape_dict['B3'] = {}
-            shape_dict['B3']['side'] = [1, 1, 256, 512]
-            shape_dict['B3']['convs'] = [[3, 3, 256, 512], [3, 3, 512, 512]]
-            with tf.variable_scope('B3_0'):
-                model['B3_0'] = nn.res_side(self._data_format, model['B2_2_pooled'], shape_dict['B3'])
-            for i in range(5):
-                with tf.variable_scope('B3_' + str(i + 1)):
-                    model['B3_' + str(i + 1)] = nn.res(self._data_format, model['B3_' + str(i)],
-                                                       shape_dict['B3']['convs'])
-
-            # Pooling 4
-            model['B3_5_pooled'] = nn.max_pool2d(self._data_format, model['B3_5'], 2, 'SAME')
-
-            # Residual Block B4_0, B4_1, B4_2
-            shape_dict['B4_0'] = {}
-            shape_dict['B4_0']['side'] = [1, 1, 512, 1024]
-            shape_dict['B4_0']['convs'] = [[3, 3, 512, 512],[3, 3, 512, 1024]]
-            with tf.variable_scope('B4_0'):
-                model['B4_0'] = nn.res_side(self._data_format, model['B3_5_pooled'], shape_dict['B4_0'])
-            shape_dict['B4_23'] = [[3, 3, 1024, 512], [3, 3, 512, 1024]]
-            for i in range(2):
-                with tf.variable_scope('B4_' + str(i + 1)):
-                    model['B4_' + str(i + 1)] = nn.res(self._data_format, model['B4_' + str(i)],
-                                                       shape_dict['B4_23'])
-
             # aggregate all feature on diff levels
+            with tf.variable_scope('B0_side_path'):
+                side_0 = nn.conv_layer(self._data_format, model['B0'], 1, 'SAME', [3, 3, 64, 16])
+                side_0 = nn.bias_layer(self._data_format, side_0, 16)
+                side_0_f = side_0
             with tf.variable_scope('B1_side_path'):
                 side_2 = nn.conv_layer(self._data_format, model['B1_2'], 1, 'SAME', [3, 3, 128, 16])
                 side_2 = nn.bias_layer(self._data_format, side_2, 16)
@@ -127,50 +99,20 @@ class ResNet():
                     side_4_f = tf.transpose(side_4_f, [0, 3, 1, 2])  # To NCHW
                 else:
                     side_4_f = tf.image.resize_images(side_4, [im_size[1], im_size[2]]) # NHWC
-            with tf.variable_scope('B3_side_path'):
-                side_8 = nn.conv_layer(self._data_format, model['B3_5'], 1, 'SAME', [3, 3, 512, 16])
-                side_8 = nn.bias_layer(self._data_format, side_8, 16)
-                if self._data_format == "NCHW":
-                    side_8 = tf.transpose(side_8, [0, 2, 3, 1])  # To NHWC
-                    side_8_f = tf.image.resize_images(side_8, [im_size[1], im_size[2]]) # NHWC
-                    side_8_f = tf.transpose(side_8_f, [0, 3, 1, 2])  # To NCHW
-                else:
-                    side_8_f = tf.image.resize_images(side_8, [im_size[1], im_size[2]]) # NHWC
-            with tf.variable_scope('B4_side_path'):
-                side_16 = nn.conv_layer(self._data_format, model['B4_2'], 1, 'SAME', [3, 3, 1024, 16])
-                side_16 = nn.bias_layer(self._data_format, side_16, 16)
-                if self._data_format == "NCHW":
-                    side_16 = tf.transpose(side_16, [0, 2, 3, 1])  # To NHWC
-                    side_16_f = tf.image.resize_images(side_16, [im_size[1], im_size[2]]) # NHWC
-                    side_16_f = tf.transpose(side_16_f, [0, 3, 1, 2])  # To NCHW
-                else:
-                    side_16_f = tf.image.resize_images(side_16, [im_size[1], im_size[2]])  # NHWC
+
 
             # concat and linearly fuse
             if self._data_format == "NCHW":
-                concat_seg_feat = tf.concat([side_2_f, side_4_f, side_8_f, side_16_f], axis=1)
+                concat_seg_feat = tf.concat([side_0_f, side_2_f, side_4_f], axis=1)
             else:
-                concat_seg_feat = tf.concat([side_2_f, side_4_f, side_8_f, side_16_f], axis=3)
+                concat_seg_feat = tf.concat([side_0_f, side_2_f, side_4_f], axis=3)
             with tf.variable_scope('fuse'):
-                seg_out = nn.conv_layer(self._data_format, concat_seg_feat, 1, 'SAME', [1, 1, 64, 2])
+                seg_out = nn.conv_layer(self._data_format, concat_seg_feat, 1, 'SAME', [1, 1, 48, 2])
                 seg_out = nn.bias_layer(self._data_format, seg_out, 2)
 
         return seg_out
 
-    def _att_gate(self, images, atts):
-        '''
-        :param images: [1,H,W,3] or [1,3,H,W], tf.float32
-        :param atts: [1,H,W,1], tf.int32
-        :return: gated image
-        '''
-        if self._data_format == 'NCHW':
-            atts = tf.transpose(atts, [0, 3, 1, 2])
-        att_mask = tf.cast(atts, tf.float32)
-        gated_img = tf.multiply(images, att_mask)
-
-        return gated_img
-
-    def _seg_loss(self, seg_out, seg_gt, seg_weight, att):
+    def _seg_loss(self, seg_out, seg_gt, seg_weight):
         '''
         :param seg_out: logits, [4,H,W,2] or [4,2,H,W], tf.float32
         :param seg_gt: [4,H,W,1], tf.int32
@@ -180,25 +122,23 @@ class ResNet():
 
         loss = self._balanced_cross_entropy(input_tensor=seg_out,
                                             labels=seg_gt,
-                                            weight=seg_weight,
-                                            att=att)
+                                            weight=seg_weight)
         tf.summary.scalar('seg_loss', loss)
 
         return loss
 
-    def train(self, feed_img, feed_seg, feed_weight, feed_att, global_step, acc_count):
+    def train(self, feed_img, feed_seg, feed_weight, global_step, acc_count):
         '''
         :param feed_img: [1,H,W,3], tf.float32
         :param feed_seg: [1,H,W,1], tf.int32
         :param feed_weight: [1,H,W,1], tf.float32
-        :param feed_att: [1,H,W,1], tf.int32
         :param global_step: keep track of global train step
         :param acc_count: number of accumulated gradients
         :return: total_loss, train_step_op, grad_acc_op
         '''
 
-        seg_out = self._build_model(feed_img, feed_att) # seg_out shape: [1,H,W,2] or [1,2,H,W] with original input image size
-        total_loss = self._seg_loss(seg_out, feed_seg, feed_weight, feed_att) \
+        seg_out = self._build_model(feed_img) # seg_out shape: [1,H,W,2] or [1,2,H,W] with original input image size
+        total_loss = self._seg_loss(seg_out, feed_seg, feed_weight) \
                      + self._l2_loss()
         tf.summary.scalar('total_loss', total_loss)
 
@@ -244,7 +184,7 @@ class ResNet():
 
         return update_op, grad_accumulator_op
 
-    def _balanced_cross_entropy(self, input_tensor, labels, weight, att):
+    def _balanced_cross_entropy(self, input_tensor, labels, weight):
         '''
         :param input_tensor: the output of final layer, must have shape [batch, C, H, W] or [batch, H, W, C], tf.float32
         :param labels: the gt binary labels, have the shape [batch, H, W, C], tf.int32
@@ -259,14 +199,9 @@ class ResNet():
         #feed_labels = tf.reshape(labels, [input_shape[0], input_shape[1]*input_shape[2]])
         #feed_weight = tf.reshape(weight, [input_shape[0], input_shape[1]*input_shape[2]])
 
-        att_mask = tf.reshape(att, [input_shape[0]*input_shape[1]*input_shape[2]])
-        bool_mask = tf.cast(att_mask, tf.bool)
         feed_weight = tf.reshape(weight, [input_shape[0]*input_shape[1]*input_shape[2]])
-        feed_weight = tf.boolean_mask(feed_weight, bool_mask)
         feed_labels = tf.reshape(labels, [input_shape[0]*input_shape[1]*input_shape[2]])
-        feed_labels = tf.boolean_mask(feed_labels, bool_mask)
         feed_logits = tf.reshape(input_tensor, [input_shape[0]*input_shape[1]*input_shape[2], input_shape[3]])
-        feed_logits = tf.boolean_mask(feed_logits, bool_mask)
 
         cross_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=feed_labels, logits=feed_logits)
         balanced_loss = tf.multiply(cross_loss, feed_weight)
@@ -285,12 +220,12 @@ class ResNet():
 
         return loss
 
-    def test(self, images, atts):
+    def test(self, images):
         '''
         :param images: batchs/single image have shape [batch, H, W, 3]
         :return: probability map, binary mask
         '''
-        net_out = self._build_model(images, atts) # [batch, 2, H, W] or [batch, H, W, 2]
+        net_out = self._build_model(images) # [batch, 2, H, W] or [batch, H, W, 2]
         if self._data_format == "NCHW":
             net_out = tf.transpose(net_out, [0, 2, 3, 1])
         prob_map = tf.nn.softmax(net_out) # [batch, H, W, 2]

@@ -180,36 +180,12 @@ def param_lr():
     vars_lr['main/B2_2/conv1/kernel'] = 1.0
     vars_lr['main/B2_2/conv2/kernel'] = 1.0
 
-    vars_lr['main/B3_0/side/kernel'] = 1.0
-    vars_lr['main/B3_0/conv1/kernel'] = 1.0
-    vars_lr['main/B3_0/conv2/kernel'] = 1.0
-    vars_lr['main/B3_1/conv1/kernel'] = 1.0
-    vars_lr['main/B3_1/conv2/kernel'] = 1.0
-    vars_lr['main/B3_2/conv1/kernel'] = 1.0
-    vars_lr['main/B3_2/conv2/kernel'] = 1.0
-    vars_lr['main/B3_3/conv1/kernel'] = 1.0
-    vars_lr['main/B3_3/conv2/kernel'] = 1.0
-    vars_lr['main/B3_4/conv1/kernel'] = 1.0
-    vars_lr['main/B3_4/conv2/kernel'] = 1.0
-    vars_lr['main/B3_5/conv1/kernel'] = 1.0
-    vars_lr['main/B3_5/conv2/kernel'] = 1.0
-
-    vars_lr['main/B4_0/side/kernel'] = 1.0
-    vars_lr['main/B4_0/conv1/kernel'] = 1.0
-    vars_lr['main/B4_0/conv2/kernel'] = 1.0
-    vars_lr['main/B4_1/conv1/kernel'] = 1.0
-    vars_lr['main/B4_1/conv2/kernel'] = 1.0
-    vars_lr['main/B4_2/conv1/kernel'] = 1.0
-    vars_lr['main/B4_2/conv2/kernel'] = 1.0
-
+    vars_lr['main/B0_side_path/kernel'] = 1.0
+    vars_lr['main/B0_side_path/bias'] = 2.0
     vars_lr['main/B1_side_path/kernel'] = 1.0
     vars_lr['main/B1_side_path/bias'] = 2.0
     vars_lr['main/B2_side_path/kernel'] = 1.0
     vars_lr['main/B2_side_path/bias'] = 2.0
-    vars_lr['main/B3_side_path/kernel'] = 1.0
-    vars_lr['main/B3_side_path/bias'] = 2.0
-    vars_lr['main/B4_side_path/kernel'] = 1.0
-    vars_lr['main/B4_side_path/bias'] = 2.0
 
     vars_lr['main/fuse/kernel'] = 0.01
     vars_lr['main/fuse/bias'] = 0.02

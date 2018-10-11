@@ -70,9 +70,9 @@ class DAVIS_dataset():
             if self._seq_set is None:
                 sys.exit('Must specify a set in txt format.')
             self._seq_paths = self._load_seq_path()
-            self._train_imgs, self._train_gts, self._train_ofs = self._get_train_data()
+            self._train_gts, self._train_ofs = self._get_train_data()
             # check length
-            if len(self._train_imgs) != len(self._train_gts) or len(self._train_imgs) == 0:
+            if len(self._train_gts) != len(self._train_ofs)or len(self._train_ofs) == 0:
                 sys.exit('Train imgs/gts length do not match.')
         elif self._mode == 'val':
             if self._seq_path is None:
@@ -103,12 +103,10 @@ class DAVIS_dataset():
     def _get_train_data(self):
 
         # drop the last frame since on OF can be computed.
-        train_imgs = []
         train_gts = []
         train_ofs = []
         num_seq = len(self._seq_paths)
         for seq_idx in range(num_seq):
-            seq_imgs = []
             seq_gts = []
             seq_of = []
             search_seq_imgs = os.path.join(self._seq_paths[seq_idx], "*.jpg")
@@ -119,7 +117,6 @@ class DAVIS_dataset():
             if num_frames == 0:
                 sys.exit("Got no frames for seq {}".format(self._seq_paths[seq_idx]))
             for i in range(num_frames):
-                frame_img = np.array(Image.open(files_seq[i])).astype(np.uint8)
                 frame_gt_path = files_seq[i].replace('JPEGImages', 'Annotations')
                 frame_gt_path = frame_gt_path.replace('jpg', 'png')
                 frame_of_path = files_seq[i].replace('JPEGImages', 'Flow')
@@ -128,7 +125,6 @@ class DAVIS_dataset():
                 # convert gt seg to binary
                 gt_bool = np.greater(frame_gt, 0)
                 gt_bin = gt_bool.astype(np.uint8)
-                seq_imgs.append(frame_img)
                 seq_gts.append(gt_bin)
                 # convert OF to float32
                 OF = read_flow(frame_of_path)
@@ -142,21 +138,19 @@ class DAVIS_dataset():
                 if break_round == 1: # if no further round required, break
                     break
                 else:
-                    start_base = len(seq_imgs) - 2
+                    start_base = len(seq_gts) - 2
                 for in_idx in range(num_frames-1):
-                    if len(seq_imgs) == self._max_train_len:
+                    if len(seq_gts) == self._max_train_len:
                         break_round = 1
                         break
                     else:
-                        seq_imgs.append(seq_imgs[start_base-in_idx])
                         seq_gts.append(seq_gts[start_base-in_idx])
                         seq_of.append(seq_of[start_base-in_idx])
-            print('After, {} frames for seq {}'.format(len(seq_imgs), seq_idx))
-            train_imgs.append(seq_imgs)
+            print('After, {} frames for seq {}'.format(len(seq_gts), seq_idx))
             train_gts.append(seq_gts)
             train_ofs.append(seq_of)
 
-        return train_imgs, train_gts, train_ofs
+        return train_gts, train_ofs
 
     def get_a_random_sample(self):
         '''
@@ -164,29 +158,24 @@ class DAVIS_dataset():
         '''
 
         # choose an image randomly
-        seq_imgs, seq_gts, seq_ofs = self.get_random_seq() # [img0, img1, ...], [seq0, seq1, ...], both np.uint8
+        seq_gts, seq_ofs = self.get_random_seq() # [seq0, seq1, ...]
         rand_frame_idx = np.random.permutation(self._permut_range_frame)[0]
-        img = seq_imgs[rand_frame_idx] # [h, w, 3], np.uint8
         seg = seq_gts[rand_frame_idx] # [h,w], np.uint8
         of = seq_ofs[rand_frame_idx] # [h,w,2], np.float32
 
         # random resize/flip
-        stacked = np.concatenate((img, seg[..., np.newaxis]), axis=-1) # [h, w, 4]
         if get_flip_bool():
             of = np.fliplr(of)
             of = np.concatenate((-of[:,:,0:1], of[:,:,1:2]), axis=-1)
-            stacked = np.fliplr(stacked)
-        img_H = np.shape(img)[0]
-        img_W = np.shape(img)[1]
+            seg = np.fliplr(seg[..., np.newaxis])
+
+        img_H = np.shape(seg)[0]
+        img_W = np.shape(seg)[1]
         scale = get_scale()
         new_H = int(img_H * scale)
         new_W = int(img_W * scale)
 
-        img_obj = Image.fromarray(stacked[:, :, 0:3], mode='RGB')
-        img_obj = img_obj.resize((new_W, new_H), Image.BILINEAR)
-        img = np.array(img_obj, img.dtype) # [h, w, 3], np.uint8
-
-        seg_obj = Image.fromarray(np.squeeze(stacked[:, :, 3:4]), mode='L')
+        seg_obj = Image.fromarray(np.squeeze(seg), mode='L')
         seg_obj = seg_obj.resize((new_W, new_H), Image.NEAREST)
         seg = np.array(seg_obj, seg.dtype)[..., np.newaxis] # [h, w, 1], np.uint8
 
@@ -194,58 +183,19 @@ class DAVIS_dataset():
         of1 = imresize(np.squeeze(of[:, :, 1:2]), (new_H, new_W), mode='F')
         of = np.stack((of0, of1),axis=-1)
 
-        # Generate attention area, size is randomized, plus randomized shift
-        size_att = np.random.randint(9, 36)
-        shiftX_att = np.random.randint(-5, 6)
-        shiftY_att = np.random.randint(-5, 6)
-        struct1 = generate_binary_structure(2, 2)
-        att = binary_dilation(np.squeeze(seg), structure=struct1, iterations=size_att).astype(seg.dtype)
-        att = np.roll(att, (shiftX_att, shiftY_att), (0,1))
-
-        # compute random shape variation through dilate boundary pixels
-        att_obj = Image.fromarray(att)
-        edge_obj = att_obj.filter(ImageFilter.FIND_EDGES)
-        rand_shape_arr = self.get_rand_att_from_edge(edge_obj, 10, 40)
-
-        # compute small-large random false attention area (close to the object)
-        large_dilate = binary_dilation(att, structure=struct1, iterations=40).astype(att.dtype)
-        large_dilate_obj = Image.fromarray(large_dilate)
-        large_edge_obj = large_dilate_obj.filter(ImageFilter.FIND_EDGES)
-        false_att_arr_close = self.get_rand_att_from_edge(large_edge_obj, 10, 100)
-
-        # compute small-large random false attention area (far from the object)
-        large_dilate2 = binary_dilation(att, structure=struct1, iterations=80).astype(att.dtype)
-        large_dilate_obj2 = Image.fromarray(large_dilate2)
-        large_edge_obj2 = large_dilate_obj2.filter(ImageFilter.FIND_EDGES)
-        false_att_arr_far = self.get_rand_att_from_edge(large_edge_obj2, 10, 100)
-
-        # fuse random shape variations and false attention, convert to binary again
-        att = att + rand_shape_arr + false_att_arr_close + false_att_arr_far
-        att_bool = np.greater(att, 0)
-        att = att_bool.astype(np.uint8)
-
-        # standardize
-        img = img.astype(np.float32) * 1.0 / 255.0
-        img -= data_mean
-        img /= data_std
         seg = seg.astype(np.int32) # [h, w, 1], np.int32
-        att = att.astype(np.int32)[..., np.newaxis] # [h, w, 1], np.int32
-
         # get balance weight
-        weight = get_seg_balance_weight(seg, att) # [h,w,1], np.float32
-        # weight = get_att_balance_weight(seg) # [h,w,1]
+        # weight = get_seg_balance_weight(seg, att) # [h,w,1], np.float32
+        weight = get_att_balance_weight(seg) # [h,w,1]
 
         # reshape
-        img = img[np.newaxis, ...]
         of = of[np.newaxis, ...]
         seg = seg[np.newaxis, ...]
         weight = weight[np.newaxis, ...]
-        att = att[np.newaxis, ...]
 
         # concat img & of
-        img_of = np.concatenate((img, of),axis=-1)
 
-        return img_of, seg, weight, att
+        return of, seg, weight
 
     def get_rand_att_from_edge(self, edge_obj, num_edge_points_max, dilate_max):
 
@@ -333,11 +283,10 @@ class DAVIS_dataset():
     def get_random_seq(self):
 
         rand_seq_idx = self._get_random_seq_idx()
-        seq_imgs = self._train_imgs[rand_seq_idx] # list: [img0, img1, ...]
         seq_gts = self._train_gts[rand_seq_idx] # list: [gt0, gt1, ...]
         seq_ofs = self._train_ofs[rand_seq_idx] # list: [of0, of1, ...]
 
-        return seq_imgs, seq_gts, seq_ofs
+        return seq_gts, seq_ofs
 
     def get_one_shot_pair(self):
         '''
