@@ -311,6 +311,9 @@ class DAVIS_dataset():
         search_seq_imgs = os.path.join(self._seq_path, "*.jpg")
         files_seq = glob.glob(search_seq_imgs)
         files_seq.sort()
+        search_seq_of = os.path.join(self._seq_path.replace('JPEGImages','Flow'), '*.flo')
+        files_of = glob.glob(search_seq_of)
+        files_of.sort()
         num_frames = len(files_seq)
         if num_frames == 0:
             sys.exit("Got no frames for seq {}".format(self._seq_path))
@@ -320,7 +323,10 @@ class DAVIS_dataset():
             frame = frame.astype(np.float32) * 1.0 / 255.0
             frame -= data_mean
             frame /= data_std
-            seq_frames.append(frame)
+            OF = read_flow(files_of[i])
+            img_of = np.concatenate((frame, OF), axis=-1)
+
+            seq_frames.append(img_of)
 
         return seq_frames
 
@@ -414,6 +420,9 @@ class DAVIS_dataset():
         gt_search_path = os.path.join(self._seq_path.replace('JPEGImages', 'Annotations'), '*.png')
         files_gt = glob.glob(gt_search_path)
         files_gt.sort()
+        of_search_path = os.path.join(self._seq_path.replace('JPEGImages', 'Flow'), '*.flo')
+        files_of = glob.glob(of_search_path)
+        files_of.sort()
         for i in range(num_frames):
             frame_gt = np.array(Image.open(files_gt[i+1])).astype(np.uint8)
             # convert to binary

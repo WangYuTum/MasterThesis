@@ -75,7 +75,7 @@ FINE_TUNE = arg_fine_tune
 FINE_TUNE_seq = arg_fine_tune_seq # max 30
 
 # config device
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 config_gpu = tf.ConfigProto()
 config_gpu.gpu_options.allow_growth = True
 #config_gpu.gpu_options.per_process_gpu_memory_fraction = 0.6
@@ -100,19 +100,19 @@ params_data = {
 with tf.device('/cpu:0'):
     val_data = DAVIS_dataset(params_data)
     if FINE_TUNE == 1:
-        # list of numpy array: [img,gt,weight]. img with [H,W,3], gt with [H,W,1], weight with [H,W,1]
+        # list of numpy array: [img,gt,weight]. img with [H,W,5], gt with [H,W,1], weight with [H,W,1]
         train_gt_weight = val_data.get_one_shot_pair()
     else:
         test_frames = val_data.get_test_frames() # list: [[img1, att1], [img2, att2], ...], img with [H,W,3], att [H,W,1]
 if FINE_TUNE == 1:
     print('Load fine-tune data for seq {} done.'.format(val_seq_paths[FINE_TUNE_seq].split('/')[-1]))
-    feed_img = tf.placeholder(tf.float32, [1, None, None, 3])
+    feed_img = tf.placeholder(tf.float32, [1, None, None, 5]) # 3(rgb)+2(of)
     feed_one_shot_gt = tf.placeholder(tf.int32, [1, None, None, 1])
     feed_one_shot_weight = tf.placeholder(tf.float32, [1, None, None, 1])
     feed_one_shot_att = tf.placeholder(tf.int32, [1, None, None, 1])
 else:
     print('Load test data for seq {} done.'.format(val_seq_paths[FINE_TUNE_seq].split('/')[-1]))
-    feed_img = tf.placeholder(tf.float32, [1, None, None, 3])
+    feed_img = tf.placeholder(tf.float32, [1, None, None, 5]) # 3(rgb)+2(of)
     feed_att = tf.placeholder(tf.int32, [1, None, None, 1])
 
 # config model params
@@ -122,9 +122,9 @@ if FINE_TUNE == 1:
         'l2_weight': 0.0002,
         'init_lr': 1e-6, # original paper: 1e-8, can be further tuned
         'data_format': 'NCHW', # optimal for cudnn
-        'save_path': '../data/ckpts/fine-tune/attention_bin/CNN-part-gate-img-v4_large/40ep/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt',
-        'tsboard_logs': '../data/tsboard_logs/fine-tune/attention_bin/CNN-part-gate-img-v4_large/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1],
-        'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large/att_bin.ckpt-24000'
+        'save_path': '../data/ckpts/fine-tune/attention_bin/CNN-part-gate-img-v4_large_Flowin/40ep/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt',
+        'tsboard_logs': '../data/tsboard_logs/fine-tune/attention_bin/CNN-part-gate-img-v4_large_Flowin/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1],
+        'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large_Flowin/att_bin.ckpt-24000'
     }
     global_iters = 1000 # original paper: 500
     save_ckpt_interval = [24300, 24500, 24700, 25000]
@@ -137,14 +137,14 @@ else:
     params_model = {
         'batch': 1,
         'data_format': 'NCHW',  # optimal for cudnn
-        'restore_fine-tune_bin': '../data/ckpts/fine-tune/attention_bin/CNN-part-gate-img-v4_large/40ep/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt-24300',
+        'restore_fine-tune_bin': '../data/ckpts/fine-tune/attention_bin/CNN-part-gate-img-v4_large_Flowin/40ep/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt-24500',
         'save_result_path': '../data/results/flow_att_seg/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1],
         'save_prob_path': '../data/results/prob_map/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]
     }
 
 # display on tsboard only during fine-tuning
 if FINE_TUNE == 1:
-    sum_img = tf.summary.image('input_img', feed_img)
+    sum_img = tf.summary.image('input_img', feed_img[:,:,:,0:3])
     sum_gt = tf.summary.image('input_gt', tf.cast(feed_one_shot_gt, tf.float16))
     sum_weight = tf.summary.image('input_weight', tf.cast(feed_one_shot_weight, tf.float16))
     sum_att = tf.summary.image('input_att', tf.cast(feed_one_shot_att, tf.float16))
