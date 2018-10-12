@@ -41,7 +41,7 @@ params_model = {
     'restore_parent_bin': '../data/ckpts/attention_bin/mo_seg/mo_seg.ckpt-xxx'
 }
 # define epochs
-epochs = 50
+epochs = 80
 frames_per_seq = 100 # each seq is extended to 100 frames by padding previous frames inversely
 steps_per_seq = 10 # because accumulate gradients 10 times before BP
 num_seq = 60
