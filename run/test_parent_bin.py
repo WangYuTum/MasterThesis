@@ -126,8 +126,8 @@ if FINE_TUNE == 1:
         'tsboard_logs': '../data/tsboard_logs/fine-tune/attention_bin/CNN-part-gate-img-v4_large_Flowin/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1],
         'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large_Flowin/att_bin.ckpt-24000'
     }
-    global_iters = 1000 # original paper: 500
-    save_ckpt_interval = [24300, 24500, 24700, 25000]
+    global_iters = 300 # original paper: 500
+    save_ckpt_interval = [24300]
     summary_write_interval = 10
     print_screen_interval = 10
     acc_count = 1
@@ -137,7 +137,7 @@ else:
     params_model = {
         'batch': 1,
         'data_format': 'NCHW',  # optimal for cudnn
-        'restore_fine-tune_bin': '../data/ckpts/fine-tune/attention_bin/CNN-part-gate-img-v4_large_Flowin/40ep/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt-24500',
+        'restore_fine-tune_bin': '../data/ckpts/fine-tune/attention_bin/CNN-part-gate-img-v4_large_Flowin/40ep/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt-24300',
         'save_result_path': '../data/results/flow_att_seg/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1],
         'save_prob_path': '../data/results/prob_map/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]
     }
@@ -203,7 +203,8 @@ with tf.Session(config=config_gpu) as sess:
             train_gt_weight = val_data.get_one_shot_pair()
 
             if global_step.eval() % summary_write_interval == 0:
-                sum_writer.add_summary(sum_all_, global_step.eval())
+                # sum_writer.add_summary(sum_all_, global_step.eval())
+                pass;
             if global_step.eval() % print_screen_interval == 0:
                 print("Fine-tune step {0} loss: {1}".format(global_step.eval(), loss_))
             if global_step.eval() in save_ckpt_interval and global_step.eval() != 0:

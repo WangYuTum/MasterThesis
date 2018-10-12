@@ -28,5 +28,4 @@ len_all = len(params)
 for i in range(len_all):
     arg0 = str(params[i][0])
     arg1 = str(params[i][1])
-    if i % 2 != 0:
-        call(['python', 'test_parent_bin.py', arg0, arg1])
+    call(['python', 'test_parent_bin.py', arg0, arg1])
