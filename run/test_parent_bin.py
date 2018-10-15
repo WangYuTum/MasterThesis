@@ -126,8 +126,8 @@ if FINE_TUNE == 1:
         'tsboard_logs': '../data/tsboard_logs/fine-tune/attention_bin/CNN-part-gate-img-v4_large_Flowin/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1],
         'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large_Flowin/att_bin.ckpt-24000'
     }
-    global_iters = 300 # original paper: 500
-    save_ckpt_interval = [24300]
+    global_iters = 500 # original paper: 500
+    save_ckpt_interval = [24300, 24500]
     summary_write_interval = 10
     print_screen_interval = 10
     acc_count = 1
