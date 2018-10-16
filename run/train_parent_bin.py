@@ -17,7 +17,7 @@ from core import resnet
 from core.nn import get_imgnet_var
 
 # config device
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 config_gpu = tf.ConfigProto()
 config_gpu.gpu_options.allow_growth = True
 
@@ -37,11 +37,11 @@ params_model = {
     'data_format': 'NCHW', # optimal for cudnn
     'save_path': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large_Flowin/att_bin.ckpt',
     'tsboard_logs': '../data/tsboard_logs/attention_bin/CNN-part-gate-img-v4_large_Flowin',
-    'restore_imgnet': '../data/ckpts/imgnet.ckpt', # restore model from where
+    'restore_imgnet': '../data/ckpts/v4_large_flowin_ep0.ckpt', # restore model from where
     'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large_Flowin/att_bin.ckpt-xxx'
 }
 # define epochs
-epochs = 100
+epochs = 80
 frames_per_seq = 100 # each seq is extended to 100 frames by padding previous frames inversely
 steps_per_seq = 10 # because accumulate gradients 10 times before BP
 num_seq = 60
