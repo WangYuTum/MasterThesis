@@ -44,7 +44,7 @@ class ResNet():
 
         ## The following 'main' scope is the primary (shared) feature layers, downsampling 16x
         shape_dict = {}
-        shape_dict['B0'] = [3,3,5,64]
+        shape_dict['B0'] = [3,3,3+2,64+8]
 
         with tf.variable_scope('main'):
             # Residual Block B0
@@ -56,8 +56,8 @@ class ResNet():
 
             # Residual Block B1_0, B1_1, B1_2
             shape_dict['B1'] = {}
-            shape_dict['B1']['side'] = [1, 1, 64, 128]
-            shape_dict['B1']['convs'] = [[3, 3, 64, 128], [3, 3, 128, 128]]
+            shape_dict['B1']['side'] = [1, 1, 64+8, 128+16]
+            shape_dict['B1']['convs'] = [[3, 3, 64+8, 128+16], [3, 3, 128+16, 128+16]]
             with tf.variable_scope('B1_0'):
                 model['B1_0'] = nn.res_side(self._data_format, model['B0_pooled'], shape_dict['B1'])
             for i in range(2):
@@ -70,8 +70,8 @@ class ResNet():
 
             # Residual Block B2_0, B2_1, B2_2
             shape_dict['B2'] = {}
-            shape_dict['B2']['side'] = [1, 1, 128, 256]
-            shape_dict['B2']['convs'] = [[3, 3, 128, 256], [3, 3, 256, 256]]
+            shape_dict['B2']['side'] = [1, 1, 128+16, 256+32]
+            shape_dict['B2']['convs'] = [[3, 3, 128+16, 256+32], [3, 3, 256+32, 256+32]]
             with tf.variable_scope('B2_0'):
                 model['B2_0'] = nn.res_side(self._data_format, model['B1_2_pooled'], shape_dict['B2'])
             for i in range(2):
@@ -84,8 +84,8 @@ class ResNet():
 
             # Residual Block B3_0 - B3_5
             shape_dict['B3'] = {}
-            shape_dict['B3']['side'] = [1, 1, 256, 512]
-            shape_dict['B3']['convs'] = [[3, 3, 256, 512], [3, 3, 512, 512]]
+            shape_dict['B3']['side'] = [1, 1, 256+32, 512+64]
+            shape_dict['B3']['convs'] = [[3, 3, 256+32, 512+64], [3, 3, 512+64, 512+64]]
             with tf.variable_scope('B3_0'):
                 model['B3_0'] = nn.res_side(self._data_format, model['B2_2_pooled'], shape_dict['B3'])
             for i in range(5):
@@ -98,11 +98,11 @@ class ResNet():
 
             # Residual Block B4_0, B4_1, B4_2
             shape_dict['B4_0'] = {}
-            shape_dict['B4_0']['side'] = [1, 1, 512, 1024]
-            shape_dict['B4_0']['convs'] = [[3, 3, 512, 512],[3, 3, 512, 1024]]
+            shape_dict['B4_0']['side'] = [1, 1, 512+64, 1024]
+            shape_dict['B4_0']['convs'] = [[3, 3, 512+64, 512+64],[3, 3, 512+64, 1024]]
             with tf.variable_scope('B4_0'):
                 model['B4_0'] = nn.res_side(self._data_format, model['B3_5_pooled'], shape_dict['B4_0'])
-            shape_dict['B4_23'] = [[3, 3, 1024, 512], [3, 3, 512, 1024]]
+            shape_dict['B4_23'] = [[3, 3, 1024, 512+64], [3, 3, 512+64, 1024]]
             for i in range(2):
                 with tf.variable_scope('B4_' + str(i + 1)):
                     model['B4_' + str(i + 1)] = nn.res(self._data_format, model['B4_' + str(i)],
@@ -110,8 +110,8 @@ class ResNet():
 
             # aggregate all feature on diff levels
             with tf.variable_scope('B1_side_path'):
-                side_2 = nn.conv_layer(self._data_format, model['B1_2'], 1, 'SAME', [3, 3, 128, 16])
-                side_2 = nn.bias_layer(self._data_format, side_2, 16)
+                side_2 = nn.conv_layer(self._data_format, model['B1_2'], 1, 'SAME', [3, 3, 128+16, 16+8])
+                side_2 = nn.bias_layer(self._data_format, side_2, 16+8)
                 if self._data_format == "NCHW":
                     side_2 = tf.transpose(side_2, [0,2,3,1]) # To NHWC
                     side_2_f = tf.image.resize_images(side_2, [im_size[1], im_size[2]]) # NHWC
@@ -119,8 +119,8 @@ class ResNet():
                 else:
                     side_2_f = tf.image.resize_images(side_2, [im_size[1], im_size[2]])  # NHWC
             with tf.variable_scope('B2_side_path'):
-                side_4 = nn.conv_layer(self._data_format, model['B2_2'], 1, 'SAME', [3, 3, 256, 16])
-                side_4 = nn.bias_layer(self._data_format, side_4, 16)
+                side_4 = nn.conv_layer(self._data_format, model['B2_2'], 1, 'SAME', [3, 3, 256+32, 16+8])
+                side_4 = nn.bias_layer(self._data_format, side_4, 16+8)
                 if self._data_format == "NCHW":
                     side_4 = tf.transpose(side_4, [0, 2, 3, 1])  # To NHWC
                     side_4_f = tf.image.resize_images(side_4, [im_size[1], im_size[2]]) # NHWC
@@ -128,8 +128,8 @@ class ResNet():
                 else:
                     side_4_f = tf.image.resize_images(side_4, [im_size[1], im_size[2]]) # NHWC
             with tf.variable_scope('B3_side_path'):
-                side_8 = nn.conv_layer(self._data_format, model['B3_5'], 1, 'SAME', [3, 3, 512, 16])
-                side_8 = nn.bias_layer(self._data_format, side_8, 16)
+                side_8 = nn.conv_layer(self._data_format, model['B3_5'], 1, 'SAME', [3, 3, 512+64, 16+8])
+                side_8 = nn.bias_layer(self._data_format, side_8, 16+8)
                 if self._data_format == "NCHW":
                     side_8 = tf.transpose(side_8, [0, 2, 3, 1])  # To NHWC
                     side_8_f = tf.image.resize_images(side_8, [im_size[1], im_size[2]]) # NHWC
@@ -137,8 +137,8 @@ class ResNet():
                 else:
                     side_8_f = tf.image.resize_images(side_8, [im_size[1], im_size[2]]) # NHWC
             with tf.variable_scope('B4_side_path'):
-                side_16 = nn.conv_layer(self._data_format, model['B4_2'], 1, 'SAME', [3, 3, 1024, 16])
-                side_16 = nn.bias_layer(self._data_format, side_16, 16)
+                side_16 = nn.conv_layer(self._data_format, model['B4_2'], 1, 'SAME', [3, 3, 1024, 16+8])
+                side_16 = nn.bias_layer(self._data_format, side_16, 16+8)
                 if self._data_format == "NCHW":
                     side_16 = tf.transpose(side_16, [0, 2, 3, 1])  # To NHWC
                     side_16_f = tf.image.resize_images(side_16, [im_size[1], im_size[2]]) # NHWC
@@ -152,7 +152,7 @@ class ResNet():
             else:
                 concat_seg_feat = tf.concat([side_2_f, side_4_f, side_8_f, side_16_f], axis=3)
             with tf.variable_scope('fuse'):
-                seg_out = nn.conv_layer(self._data_format, concat_seg_feat, 1, 'SAME', [1, 1, 64, 2])
+                seg_out = nn.conv_layer(self._data_format, concat_seg_feat, 1, 'SAME', [1, 1, 64+32, 2])
                 seg_out = nn.bias_layer(self._data_format, seg_out, 2)
 
         return seg_out

@@ -132,8 +132,8 @@ def get_imgnet_var():
     ## Imgnet weights variables
     imgnet_dict = {}
     # for the first conv, dont use since input is now 3(rgb)+2(OF) channels
-    # with tf.variable_scope('main/B0', reuse=True):
-    #     imgnet_dict['main/B0/kernel'] = tf.get_variable('kernel')
+    with tf.variable_scope('main/B0', reuse=True):
+        imgnet_dict['main/B0/kernel'] = tf.get_variable('kernel')
     # for all resnet side convs
     for i in range(4):
         with tf.variable_scope('main/B' + str(i + 1) + '_0/side', reuse=True):
@@ -151,6 +151,18 @@ def get_imgnet_var():
             imgnet_dict['main/B3_' + str(i + 3) + '/conv1/kernel'] = tf.get_variable('kernel')
         with tf.variable_scope('main/B3_' + str(i + 3) + '/conv2', reuse=True):
             imgnet_dict['main/B3_' + str(i + 3) + '/conv2/kernel'] = tf.get_variable('kernel')
+
+    # for side_path 
+    for i in range(4):
+        with tf.variable_scope('main/B' + str(i+1) + '_side_path', reuse=True):
+            imgnet_dict['main/B' + str(i+1) + '_side_path/kernel'] = tf.get_variable('kernel')
+            imgnet_dict['main/B' + str(i+1) + '_side_path/bias'] = tf.get_variable('bias')
+
+    # for fuse layer
+    with tf.variable_scope('main/fuse', reuse=True):
+        imgnet_dict['main/fuse/kernel'] = tf.get_variable('kernel')
+        imgnet_dict['main/fuse/bias'] = tf.get_variable('bias')
+
 
     return imgnet_dict
 

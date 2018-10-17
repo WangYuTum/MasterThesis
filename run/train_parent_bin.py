@@ -17,7 +17,7 @@ from core import resnet
 from core.nn import get_imgnet_var
 
 # config device
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 config_gpu = tf.ConfigProto()
 config_gpu.gpu_options.allow_growth = True
 
@@ -38,10 +38,10 @@ params_model = {
     'save_path': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large_Flowin/att_bin.ckpt',
     'tsboard_logs': '../data/tsboard_logs/attention_bin/CNN-part-gate-img-v4_large_Flowin',
     'restore_imgnet': '../data/ckpts/v4_large_flowin_ep0.ckpt', # restore model from where
-    'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large_Flowin/att_bin.ckpt-xxx'
+    'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large_Flowin/att_bin.ckpt-12000'
 }
 # define epochs
-epochs = 80
+epochs = 60
 frames_per_seq = 100 # each seq is extended to 100 frames by padding previous frames inversely
 steps_per_seq = 10 # because accumulate gradients 10 times before BP
 num_seq = 60
@@ -73,7 +73,8 @@ init_op = tf.global_variables_initializer()
 sum_all = tf.summary.merge_all()
 
 # define saver
-saver_img = tf.train.Saver(var_list=get_imgnet_var())
+# saver_img = tf.train.Saver(var_list=get_imgnet_var())
+saver_tmp = tf.train.Saver()
 saver_parent = tf.train.Saver(max_to_keep=10)
 
 # run the session
@@ -82,8 +83,10 @@ with tf.Session(config=config_gpu) as sess:
     sess.run(init_op)
 
     # restore all variables
-    saver_img.restore(sess, params_model['restore_imgnet'])
-    print('restored variables from {}'.format(params_model['restore_imgnet']))
+    # saver_img.restore(sess, params_model['restore_imgnet'])
+    # print('restored variables from {}'.format(params_model['restore_imgnet']))
+    saver_tmp.restore(sess, params_model['restore_parent_bin'])
+    print('restored variables from {}'.format(params_model['restore_parent_bin']))
     print('All weights initialized.')
 
     print("Starting training for {0} epochs, {1} total steps.".format(epochs, total_steps))
