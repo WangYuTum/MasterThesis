@@ -38,10 +38,10 @@ params_model = {
     'save_path': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large_Flowin/att_bin.ckpt',
     'tsboard_logs': '../data/tsboard_logs/attention_bin/CNN-part-gate-img-v4_large_Flowin',
     'restore_imgnet': '../data/ckpts/v4_large_flowin_ep0.ckpt', # restore model from where
-    'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large_Flowin/att_bin.ckpt-12000'
+    'restore_parent_bin': '../data/ckpts/v4_large_flowin_ep0.ckpt'
 }
 # define epochs
-epochs = 60
+epochs = 20
 frames_per_seq = 100 # each seq is extended to 100 frames by padding previous frames inversely
 steps_per_seq = 10 # because accumulate gradients 10 times before BP
 num_seq = 60
@@ -49,7 +49,7 @@ steps_per_ep = num_seq * steps_per_seq
 acc_count = 10 # accumulate 10 gradients
 total_steps = epochs * steps_per_ep # total steps of BP, 60000
 global_step = tf.Variable(0, name='global_step', trainable=False) # incremented automatically by 1 after 1 BP
-save_ckpt_interval = 12000 # corresponds to 20 epoch
+save_ckpt_interval = 1200 # corresponds to 2 epoch
 summary_write_interval = 50
 print_screen_interval = 20
 
@@ -74,7 +74,7 @@ sum_all = tf.summary.merge_all()
 
 # define saver
 # saver_img = tf.train.Saver(var_list=get_imgnet_var())
-saver_tmp = tf.train.Saver()
+saver_tmp = tf.train.Saver(var_list=get_imgnet_var())
 saver_parent = tf.train.Saver(max_to_keep=10)
 
 # run the session

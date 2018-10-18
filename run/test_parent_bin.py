@@ -124,10 +124,10 @@ if FINE_TUNE == 1:
         'data_format': 'NCHW', # optimal for cudnn
         'save_path': '../data/ckpts/fine-tune/attention_bin/CNN-part-gate-img-v4_large_Flowin/40ep/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt',
         'tsboard_logs': '../data/tsboard_logs/fine-tune/attention_bin/CNN-part-gate-img-v4_large_Flowin/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1],
-        'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large_Flowin/att_bin.ckpt-12000'
+        'restore_parent_bin': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large_Flowin/att_bin.ckpt-24000'
     }
     global_iters = 500 # original paper: 500
-    save_ckpt_interval = [12300, 12500]
+    save_ckpt_interval = [24300, 24500]
     summary_write_interval = 10
     print_screen_interval = 10
     acc_count = 1
@@ -137,7 +137,7 @@ else:
     params_model = {
         'batch': 1,
         'data_format': 'NCHW',  # optimal for cudnn
-        'restore_fine-tune_bin': '../data/ckpts/fine-tune/attention_bin/CNN-part-gate-img-v4_large_Flowin/40ep/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt-12500',
+        'restore_fine-tune_bin': '../data/ckpts/fine-tune/attention_bin/CNN-part-gate-img-v4_large_Flowin/40ep/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]+'/fine-tune.ckpt-24500',
         'save_result_path': '../data/results/flow_att_seg/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1],
         'save_prob_path': '../data/results/prob_map/'+val_seq_paths[FINE_TUNE_seq].split('/')[-1]
     }
