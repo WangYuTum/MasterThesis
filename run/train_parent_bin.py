@@ -17,7 +17,7 @@ from core import resnet
 from core.nn import get_imgnet_var
 
 # config device
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 config_gpu = tf.ConfigProto()
 config_gpu.gpu_options.allow_growth = True
 
@@ -31,17 +31,17 @@ with tf.device('/cpu:0'):
 
 # config train params
 params_model = {
-    'batch': 1, # feed a random image at a time
-    'l2_weight': 0.0002,
-    'init_lr': 1e-5, # original paper: 1e-8,
+    'batch': 1, # feed a random pair of images at a time
+    'l2_weight': 0.0005,
+    'init_lr': 5e-5,
     'data_format': 'NCHW', # optimal for cudnn
-    'save_path': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large_Flowin/att_bin.ckpt',
+    'save_path': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large_Flowside/att_bin.ckpt',
     'tsboard_logs': '../data/tsboard_logs/attention_bin/CNN-part-gate-img-v4_large_Flowin',
-    'restore_imgnet': '../data/ckpts/v4_large_flowin_ep0.ckpt', # restore model from where
-    'restore_parent_bin': '../data/ckpts/v4_large_flowin_ep0.ckpt'
+    'restore_0': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large/att_bin.ckpt-24000', # restore model from where
+    'restore_parent_bin': '../data/ckpts/xxx.ckpt'
 }
 # define epochs
-epochs = 20
+epochs = 60
 frames_per_seq = 100 # each seq is extended to 100 frames by padding previous frames inversely
 steps_per_seq = 10 # because accumulate gradients 10 times before BP
 num_seq = 60
@@ -49,47 +49,55 @@ steps_per_ep = num_seq * steps_per_seq
 acc_count = 10 # accumulate 10 gradients
 total_steps = epochs * steps_per_ep # total steps of BP, 60000
 global_step = tf.Variable(0, name='global_step', trainable=False) # incremented automatically by 1 after 1 BP
-save_ckpt_interval = 1200 # corresponds to 2 epoch
-summary_write_interval = 50
-print_screen_interval = 20
+save_ckpt_interval = 3000 # corresponds to 5 epoch
+summary_write_interval = 20
+print_screen_interval = 10
 
 # define placeholders
-feed_img = tf.placeholder(tf.float32, (params_model['batch'], None, None, 5)) # 3(rgb)+2(of)
-feed_seg = tf.placeholder(tf.int32, (params_model['batch'], None, None, 1))
-feed_weight = tf.placeholder(tf.float32, (params_model['batch'], None, None, 1))
-feed_att = tf.placeholder(tf.int32, (params_model['batch'], None, None, 1))
+feed_img = tf.placeholder(tf.float32, (params_model['batch']+1, None, None, 3)) # img(t+1), img(t)
+feed_seg = tf.placeholder(tf.int32, (params_model['batch'], None, None, 1)) # img(t+1)
+feed_weight = tf.placeholder(tf.float32, (params_model['batch'], None, None, 1)) # img/seg(t+1)
+feed_att = tf.placeholder(tf.int32, (params_model['batch']+1, None, None, 1)) # img(t+1), img(t)
+feed_flow = tf.placeholder(tf.float32, (params_model['batch'], None, None, 2)) # img(t)
+feed_mask = tf.placeholder(tf.float32, (params_model['batch'], None, None, 1)) # mask for trans_obj and surrounding background, smaller than att(t+1)
+feed_mask_w = tf.placeholder(tf.float32, (params_model['batch'], None, None, 1)) # balance weight for trans_obj
+feed_train_flag = tf.placeholder(tf.int32, ([])) # train_flag: 0,1,2,3
 
 # display
-sum_img = tf.summary.image('img', feed_img[:,:,:,0:3])
-sum_seg = tf.summary.image('seg', tf.cast(feed_seg, tf.float16))
-sum_w = tf.summary.image('weight', feed_weight)
-sum_att = tf.summary.image('att', tf.cast(feed_att, tf.float16))
+sum_img1 = tf.summary.image('img_t1', feed_img[0:1,:,:,:])
+sum_img0 = tf.summary.image('img_t0', feed_img[1:2,:,:,:])
+sum_seg = tf.summary.image('seg_t1', tf.cast(feed_seg, tf.float16))
+sum_weight = tf.summary.image('weight_t1', feed_weight)
+sum_att1 = tf.summary.image('att_t1', tf.cast(feed_att[0:1,:,:,:], tf.float16))
+sum_att0 = tf.summary.image('att_t0', tf.cast(feed_att[1:2,:,:,:], tf.float16))
+sum_mask = tf.summary.image('mask', tf.cast(feed_mask, tf.float16))
+sum_mask_w = tf.summary.image('mask_w', tf.cast(feed_mask_w, tf.float16))
+sum_train_flag = tf.summary.scalar('train_flag', feed_train_flag)
 
 
 # build network, on GPU by default
 model = resnet.ResNet(params_model)
-loss, bp_step, grad_acc_op = model.train(feed_img, feed_seg, feed_weight, feed_att, global_step, acc_count)
+loss, bp_step, grad_acc_op = model.train(feed_img, feed_seg, feed_weight, feed_att, feed_flow, feed_mask,
+                                         feed_mask_w, global_step, acc_count, 2)
 init_op = tf.global_variables_initializer()
 sum_all = tf.summary.merge_all()
 
 # define saver
-# saver_img = tf.train.Saver(var_list=get_imgnet_var())
 saver_tmp = tf.train.Saver(var_list=get_imgnet_var())
-saver_parent = tf.train.Saver(max_to_keep=10)
+saver_parent = tf.train.Saver(max_to_keep=20)
 
 # run the session
 with tf.Session(config=config_gpu) as sess:
     sum_writer = tf.summary.FileWriter(params_model['tsboard_logs'], sess.graph)
     sess.run(init_op)
 
-    # restore all variables
-    # saver_img.restore(sess, params_model['restore_imgnet'])
-    # print('restored variables from {}'.format(params_model['restore_imgnet']))
-    saver_tmp.restore(sess, params_model['restore_parent_bin'])
-    print('restored variables from {}'.format(params_model['restore_parent_bin']))
+    # restore selected/all variables
+    saver_tmp.restore(sess, params_model['restore_0'])
+    print('restored variables from {}'.format(params_model['restore_0']))
     print('All weights initialized.')
 
     print("Starting training for {0} epochs, {1} total steps.".format(epochs, total_steps))
+    train_flag = 2
     for ep in range(epochs):
         print("Epoch {} ...".format(ep))
         # train steps for each epoch
@@ -97,10 +105,20 @@ with tf.Session(config=config_gpu) as sess:
             # accumulate gradients
             for _ in range(acc_count):
                 # choose an image randomly (randomly pre-processing)
-                img, seg, weight, att = mydata.get_a_random_sample() # [1,h,w,3] float32, [1,h,w,1] int32, [1,h,w,1] float32
-                feed_dict_v = {feed_img: img, feed_seg: seg, feed_weight: weight, feed_att: att}
+                img, seg, weight, att, flow, mask, mask_w = mydata.get_a_random_sample()
+                feed_dict_v = {feed_img: img, feed_seg: seg, feed_weight: weight, feed_att: att,
+                               feed_flow: flow, feed_mask: mask, feed_mask_w: mask_w}
+                train_flag_dict = {feed_train_flag: train_flag}
+                sum_flag_ = sess.run(sum_train_flag, feed_dict=train_flag_dict)
+                sum_writer.add_summary(sum_flag_, global_step.eval())
                 # forward
-                run_result = sess.run([loss, sum_all]+grad_acc_op, feed_dict=feed_dict_v)
+                if train_flag == 0:
+                    run_result = sess.run([loss, sum_all] + grad_acc_op[0] + grad_acc_op[2], feed_dict=feed_dict_v)
+                elif train_flag == 1:
+                    run_result = sess.run([loss, sum_all] + grad_acc_op[1]+ grad_acc_op[2], feed_dict=feed_dict_v)
+                elif train_flag == 2:
+                    run_result = sess.run([loss, sum_all] + grad_acc_op[0] + grad_acc_op[1] + grad_acc_op[2],
+                                          feed_dict=feed_dict_v)
                 loss_ = run_result[0]
                 sum_all_ = run_result[1]
             # BP, increment global_step by 1 automatically

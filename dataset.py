@@ -160,35 +160,53 @@ class DAVIS_dataset():
 
     def get_a_random_sample(self):
         '''
-        :return: img [1, h, w, 3] float32, seg [1, h, w, 1] int32, weight [1, h, w, 1] float32
+        :return: img [2, h, w, 3] float32, t+1, t
+                 seg [1, h, w, 1] int32, t+1
+                 weight [1, h, w, 1] float32, t+1
+                 att [2, h, w, 1] int32, t+1, t
+                 flow [1, h, w, 2] float32, t
+                 mask [1, h, w, 1] float32, t
+                 mask_w [1, h, w, 1] float32, t
         '''
 
-        # choose an image randomly
+        # choose an image(t+1) randomly
         seq_imgs, seq_gts, seq_ofs = self.get_random_seq() # [img0, img1, ...], [seq0, seq1, ...], both np.uint8
         rand_frame_idx = np.random.permutation(self._permut_range_frame)[0]
-        img = seq_imgs[rand_frame_idx] # [h, w, 3], np.uint8
-        seg = seq_gts[rand_frame_idx] # [h,w], np.uint8
-        of = seq_ofs[rand_frame_idx] # [h,w,2], np.float32
+        while rand_frame_idx < 1: # frame id must be >=1
+            rand_frame_idx = np.random.permutation(self._permut_range_frame)[0]
+        img1 = seq_imgs[rand_frame_idx] # [h, w, 3], np.uint8
+        img0 = seq_imgs[rand_frame_idx-1]
+        seg1 = seq_gts[rand_frame_idx] # [h,w], np.uint8
+        seg0 = seq_gts[rand_frame_idx-1]
+        of = seq_ofs[rand_frame_idx-1]
 
         # random resize/flip
-        stacked = np.concatenate((img, seg[..., np.newaxis]), axis=-1) # [h, w, 4]
+        stacked = np.concatenate((img1, img0, seg1[..., np.newaxis], seg0[..., np.newaxis]), axis=-1) # [h, w, 8]
         if get_flip_bool():
             of = np.fliplr(of)
             of = np.concatenate((-of[:,:,0:1], of[:,:,1:2]), axis=-1)
             stacked = np.fliplr(stacked)
-        img_H = np.shape(img)[0]
-        img_W = np.shape(img)[1]
+        img_H = np.shape(img1)[0]
+        img_W = np.shape(img1)[1]
         scale = get_scale()
         new_H = int(img_H * scale)
         new_W = int(img_W * scale)
 
-        img_obj = Image.fromarray(stacked[:, :, 0:3], mode='RGB')
-        img_obj = img_obj.resize((new_W, new_H), Image.BILINEAR)
-        img = np.array(img_obj, img.dtype) # [h, w, 3], np.uint8
+        img_obj1 = Image.fromarray(stacked[:, :, 0:3], mode='RGB')
+        img_obj1 = img_obj1.resize((new_W, new_H), Image.BILINEAR)
+        img1 = np.array(img_obj1, img1.dtype) # [h, w, 3], np.uint8
 
-        seg_obj = Image.fromarray(np.squeeze(stacked[:, :, 3:4]), mode='L')
-        seg_obj = seg_obj.resize((new_W, new_H), Image.NEAREST)
-        seg = np.array(seg_obj, seg.dtype)[..., np.newaxis] # [h, w, 1], np.uint8
+        img_obj0 = Image.fromarray(stacked[:, :, 3:6], mode='RGB')
+        img_obj0 = img_obj0.resize((new_W, new_H), Image.BILINEAR)
+        img0 = np.array(img_obj0, img0.dtype) # [h, w, 3], np.uint8
+
+        seg_obj1 = Image.fromarray(np.squeeze(stacked[:, :, 6:7]), mode='L')
+        seg_obj1 = seg_obj1.resize((new_W, new_H), Image.NEAREST)
+        seg1 = np.array(seg_obj1, seg1.dtype)[..., np.newaxis] # [h, w, 1], np.uint8
+
+        seg_obj0 = Image.fromarray(np.squeeze(stacked[:, :, 7:8]), mode='L')
+        seg_obj0 = seg_obj0.resize((new_W, new_H), Image.NEAREST)
+        seg0 = np.array(seg_obj0, seg0.dtype)[..., np.newaxis] # [h, w, 1], np.uint8
 
         of0 = imresize(np.squeeze(of[:, :, 0:1]), (new_H, new_W), mode='F')
         of1 = imresize(np.squeeze(of[:, :, 1:2]), (new_H, new_W), mode='F')
@@ -199,53 +217,79 @@ class DAVIS_dataset():
         shiftX_att = np.random.randint(-5, 6)
         shiftY_att = np.random.randint(-5, 6)
         struct1 = generate_binary_structure(2, 2)
-        att = binary_dilation(np.squeeze(seg), structure=struct1, iterations=size_att).astype(seg.dtype)
-        att = np.roll(att, (shiftX_att, shiftY_att), (0,1))
+        att1 = binary_dilation(np.squeeze(seg1), structure=struct1, iterations=size_att).astype(seg1.dtype)
+        att1 = np.roll(att1, (shiftX_att, shiftY_att), (0,1))
 
         # compute random shape variation through dilate boundary pixels
-        att_obj = Image.fromarray(att)
-        edge_obj = att_obj.filter(ImageFilter.FIND_EDGES)
-        rand_shape_arr = self.get_rand_att_from_edge(edge_obj, 10, 40)
+        att_obj1 = Image.fromarray(att1)
+        edge_obj1 = att_obj1.filter(ImageFilter.FIND_EDGES)
+        rand_shape_arr1 = self.get_rand_att_from_edge(edge_obj1, 10, 40)
 
         # compute small-large random false attention area (close to the object)
-        large_dilate = binary_dilation(att, structure=struct1, iterations=40).astype(att.dtype)
-        large_dilate_obj = Image.fromarray(large_dilate)
-        large_edge_obj = large_dilate_obj.filter(ImageFilter.FIND_EDGES)
-        false_att_arr_close = self.get_rand_att_from_edge(large_edge_obj, 10, 100)
+        large_dilate1 = binary_dilation(att1, structure=struct1, iterations=40).astype(att1.dtype)
+        large_dilate_obj1 = Image.fromarray(large_dilate1)
+        large_edge_obj1 = large_dilate_obj1.filter(ImageFilter.FIND_EDGES)
+        false_att_arr_close1 = self.get_rand_att_from_edge(large_edge_obj1, 10, 100)
 
         # compute small-large random false attention area (far from the object)
-        large_dilate2 = binary_dilation(att, structure=struct1, iterations=80).astype(att.dtype)
-        large_dilate_obj2 = Image.fromarray(large_dilate2)
-        large_edge_obj2 = large_dilate_obj2.filter(ImageFilter.FIND_EDGES)
-        false_att_arr_far = self.get_rand_att_from_edge(large_edge_obj2, 10, 100)
+        large_dilate2_1 = binary_dilation(att1, structure=struct1, iterations=80).astype(att1.dtype)
+        large_dilate_obj2_1 = Image.fromarray(large_dilate2_1)
+        large_edge_obj2_1 = large_dilate_obj2_1.filter(ImageFilter.FIND_EDGES)
+        false_att_arr_far1 = self.get_rand_att_from_edge(large_edge_obj2_1, 10, 100)
 
         # fuse random shape variations and false attention, convert to binary again
-        att = att + rand_shape_arr + false_att_arr_close + false_att_arr_far
-        att_bool = np.greater(att, 0)
-        att = att_bool.astype(np.uint8)
+        att1 = att1 + rand_shape_arr1 + false_att_arr_close1 + false_att_arr_far1
+        att_bool1 = np.greater(att1, 0)
+        att1 = att_bool1.astype(np.uint8)
+
+        # get frame t att
+        size_att = np.random.randint(15, 36)
+        att0 = binary_dilation(np.squeeze(seg0), structure=struct1, iterations=size_att).astype(seg0.dtype)
+        # compute random shape variation through dilate boundary pixels
+        att_obj0 = Image.fromarray(att0)
+        edge_obj0 = att_obj0.filter(ImageFilter.FIND_EDGES)
+        rand_shape_arr0 = self.get_rand_att_from_edge(edge_obj0, 5, 15)
+        att0 = att0 + rand_shape_arr0
+        att_bool0 = np.greater(att0, 0)
+        att0 = att_bool0.astype(np.uint8)
+        # get mask of transformed frame t
+        size_att = np.random.randint(5, 20)
+        mask = binary_dilation(np.squeeze(seg1), structure=struct1, iterations=size_att).astype(seg1.dtype)
 
         # standardize
-        img = img.astype(np.float32) * 1.0 / 255.0
-        img -= data_mean
-        img /= data_std
-        seg = seg.astype(np.int32) # [h, w, 1], np.int32
-        att = att.astype(np.int32)[..., np.newaxis] # [h, w, 1], np.int32
+        img1 = img1.astype(np.float32) * 1.0 / 255.0
+        img1 -= data_mean
+        img1 /= data_std
+        img0 = img0.astype(np.float32) * 1.0 / 255.0
+        img0 -= data_mean
+        img0 /= data_std
+        seg1 = seg1.astype(np.int32) # [h, w, 1], np.int32
+        att1 = att1.astype(np.int32)[..., np.newaxis] # [h, w, 1], np.int32
+        att0 = att0.astype(np.int32)[..., np.newaxis] # [h, w, 1], np.int32
+        mask = mask.astype(np.float32)[..., np.newaxis] # [h, w, 1], np.int32
 
         # get balance weight
-        weight = get_seg_balance_weight(seg, att) # [h,w,1], np.float32
+        weight1 = get_seg_balance_weight(seg1, att1) # [h,w,1], np.float32
+        mask_w = get_seg_balance_weight(seg1, mask) # [h,w,1], np.float32
         # weight = get_att_balance_weight(seg) # [h,w,1]
 
         # reshape
-        img = img[np.newaxis, ...]
+        img1 = img1[np.newaxis, ...]
+        img0 = img0[np.newaxis, ...]
         of = of[np.newaxis, ...]
-        seg = seg[np.newaxis, ...]
-        weight = weight[np.newaxis, ...]
-        att = att[np.newaxis, ...]
+        seg1 = seg1[np.newaxis, ...]
+        weight1 = weight1[np.newaxis, ...]
+        att1 = att1[np.newaxis, ...]
+        att0 = att0[np.newaxis, ...]
+        mask = mask[np.newaxis, ...]
+        mask_w = mask_w[np.newaxis, ...]
 
-        # concat img & of
-        img_of = np.concatenate((img, of),axis=-1)
+        # concat
+        imgs = np.concatenate((img1, img0),axis=0)
+        atts = np.concatenate((att1, att0),axis=0)
 
-        return img_of, seg, weight, att
+
+        return imgs, seg1, weight1, atts, of, mask, mask_w
 
     def get_rand_att_from_edge(self, edge_obj, num_edge_points_max, dilate_max):
 
