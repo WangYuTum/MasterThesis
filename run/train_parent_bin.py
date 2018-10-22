@@ -17,7 +17,7 @@ from core import resnet
 from core.nn import get_imgnet_var
 
 # config device
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 config_gpu = tf.ConfigProto()
 config_gpu.gpu_options.allow_growth = True
 
@@ -72,7 +72,6 @@ sum_att1 = tf.summary.image('att_t1', tf.cast(feed_att[0:1,:,:,:], tf.float16))
 sum_att0 = tf.summary.image('att_t0', tf.cast(feed_att[1:2,:,:,:], tf.float16))
 sum_mask = tf.summary.image('mask', tf.cast(feed_mask, tf.float16))
 sum_mask_w = tf.summary.image('mask_w', tf.cast(feed_mask_w, tf.float16))
-sum_train_flag = tf.summary.scalar('train_flag', feed_train_flag)
 
 
 # build network, on GPU by default
@@ -81,6 +80,8 @@ loss, bp_step, grad_acc_op = model.train(feed_img, feed_seg, feed_weight, feed_a
                                          feed_mask_w, global_step, acc_count, 2)
 init_op = tf.global_variables_initializer()
 sum_all = tf.summary.merge_all()
+
+sum_train_flag = tf.summary.scalar('train_flag', feed_train_flag)
 
 # define saver
 saver_tmp = tf.train.Saver(var_list=get_imgnet_var())

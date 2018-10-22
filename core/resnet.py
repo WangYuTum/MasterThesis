@@ -41,6 +41,7 @@ class ResNet():
         im_size = tf.shape(images)
         if self._data_format == "NCHW":
             images = tf.transpose(images, [0,3,1,2])    # [N,C,H,W]
+            flow_in = tf.transpose(flow_in, [0,3,1,2]) # [N,C,H,W]
 
         ## attention gating on raw images, assuming batch=2
         images = self._att_gate(images, atts)
