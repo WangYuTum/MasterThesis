@@ -10,29 +10,12 @@ import tensorflow as tf
 import sys
 
 
-def conv_layer(data_format, input_tensor, stride=1, padding='SAME', shape=None, train_flag=None):
+def conv_layer(data_format, input_tensor, stride=1, padding='SAME', shape=None):
     ''' The standard convolution layer '''
     scope_name = tf.get_variable_scope().name
     print('Layer name: %s'%scope_name)
-    trainable = False
-    if train_flag == 0:
-        if scope_name.find('main') != 0 or scope_name.find('classifier') != 0:
-            trainable = True
-        else:
-            trainable = False
-    elif train_flag == 1:
-        if scope_name.find('optical_flow') != 0 or scope_name.find('feat_transform') != 0 or scope_name.find('classifier') != 0:
-            trainable = True
-        else:
-            trainable = False
-    elif train_flag == 2:
-        trainable = True
-    elif trainable == 3:
-        trainable = False
-    else:
-        sys.exit('Non-valid train_flag.')
 
-    kernel = create_conv_kernel(shape, trainable)
+    kernel = create_conv_kernel(shape)
 
     if data_format == "NCHW":
         conv_stride = [1, 1, stride, stride]
@@ -43,7 +26,7 @@ def conv_layer(data_format, input_tensor, stride=1, padding='SAME', shape=None, 
     return conv_out
 
 
-def res_side(data_format, input_tensor, shape_dict, train_flag=None):
+def res_side(data_format, input_tensor, shape_dict):
     ''' The residual block unit with side conv '''
 
     # The 1st activation
@@ -51,22 +34,22 @@ def res_side(data_format, input_tensor, shape_dict, train_flag=None):
 
     # The side conv
     with tf.variable_scope('side'):
-        side_out = conv_layer(data_format, relu_out1, 1, 'SAME', shape_dict['side'], train_flag)
+        side_out = conv_layer(data_format, relu_out1, 2, 'SAME', shape_dict['side'])
     # The 1st conv
     with tf.variable_scope('conv1'):
-        conv_out1 = conv_layer(data_format, relu_out1, 1, 'SAME', shape_dict['convs'][0], train_flag)
+        conv_out1 = conv_layer(data_format, relu_out1, 2, 'SAME', shape_dict['convs'][0])
     # The 2nd activation
     relu_out2 = ReLu_layer(conv_out1)
     # The 2nd conv layer
     with tf.variable_scope('conv2'):
-        conv_out2 = conv_layer(data_format, relu_out2, 1, 'SAME', shape_dict['convs'][1], train_flag)
+        conv_out2 = conv_layer(data_format, relu_out2, 1, 'SAME', shape_dict['convs'][1])
     # Fuse
     block_out = tf.add(side_out, conv_out2)
 
     return  block_out
 
 
-def res(data_format, input_tensor, shape_dict, train_flag=None):
+def res(data_format, input_tensor, shape_dict):
     ''' The residual block unit with shortcut '''
 
     scope_name = tf.get_variable_scope().name
@@ -81,25 +64,25 @@ def res(data_format, input_tensor, shape_dict, train_flag=None):
     relu_out1 = ReLu_layer(input_tensor)
     # The 1st conv layer
     with tf.variable_scope('conv1'):
-        conv_out1 = conv_layer(data_format, relu_out1, 1, 'SAME', shape_conv1, train_flag)
+        conv_out1 = conv_layer(data_format, relu_out1, 1, 'SAME', shape_conv1)
     # The 2nd activation
     relu_out2 = ReLu_layer(conv_out1)
     # The 2nd conv layer
     with tf.variable_scope('conv2'):
-        conv_out2 = conv_layer(data_format, relu_out2, 1, 'SAME', shape_conv2, train_flag)
+        conv_out2 = conv_layer(data_format, relu_out2, 1, 'SAME', shape_conv2)
     # Fuse
     block_out = tf.add(input_tensor, conv_out2)
 
     return block_out
 
 
-def create_conv_kernel(shape=None, trainable=False):
+def create_conv_kernel(shape=None):
     '''
     :param shape: the shape of kernel to be created
     :return: a tf.tensor
     '''
     init_op = tf.truncated_normal_initializer(stddev=0.001)
-    var = tf.get_variable(name='kernel', shape=shape, initializer=init_op, trainable=trainable)
+    var = tf.get_variable(name='kernel', shape=shape, initializer=init_op, trainable=True)
 
     return var
 
