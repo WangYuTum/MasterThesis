@@ -424,7 +424,7 @@ class ResNet():
         # compute cosine dist
         loss = tf.losses.cosine_distance(labels=target_vec, predictions=pred_vec, axis=-1,
                                          weights=tf.cast(mask, tf.float32),
-                                         reduction=tf.losses.Reduction.SUM_BY_NONZERO_WEIGHTS)
+                                         reduction=tf.losses.Reduction.SUM_BY_NONZERO_WEIGHTS) * 5.0
         tf.summary.scalar('sim_loss', loss)
 
         return loss
@@ -449,10 +449,20 @@ class ResNet():
         #   seg_loss for img(t+1)
         #   seg_loss for img(t)
         #   sim_loss between img(t+1), img(t)
-        total_loss = self._seg_loss(seg_out[0:1,:,:,:], feed_seg, feed_weight, feed_att[0:1,:,:,:], 'main') \
-                     + self._seg_loss(seg_out[1:2,:,:,:], feed_seg, weight, mask, 'transformed') \
-                     + self._sim_loss(seg_feat[1:2,:,:,:], seg_feat[0:1,:,:,:], feed_seg) \
-                     + self._l2_loss()
+        if train_flag == 2:
+            total_loss = self._seg_loss(seg_out[0:1,:,:,:], feed_seg, feed_weight, feed_att[0:1,:,:,:], 'main') \
+                        + self._seg_loss(seg_out[1:2,:,:,:], feed_seg, weight, mask, 'transformed') \
+                        + self._sim_loss(seg_feat[1:2,:,:,:], seg_feat[0:1,:,:,:], feed_seg) \
+                        + self._l2_loss(train_flag)
+        elif train_flag == 1:
+            total_loss = self._seg_loss(seg_out[1:2,:,:,:], feed_seg, weight, mask, 'transformed') \
+                        + self._sim_loss(seg_feat[1:2,:,:,:], seg_feat[0:1,:,:,:], feed_seg) \
+                        + self._l2_loss(train_flag)
+        elif train_flag == 0:
+            total_loss = self._seg_loss(seg_out[0:1,:,:,:], feed_seg, feed_weight, feed_att[0:1,:,:,:], 'main') \
+                         + self._l2_loss(train_flag)
+        else:
+            sys.exit('No valid train_flag.')
         tf.summary.scalar('total_loss', total_loss)
 
         # display current output
@@ -460,14 +470,19 @@ class ResNet():
             seg_pred = tf.transpose(seg_out, [0,2,3,1])
         else:
             seg_pred = seg_out
-        tf.summary.image('pred_main', tf.cast(tf.nn.softmax(seg_pred)[0:1, :, :, 1:2], tf.float16))
-        tf.summary.image('pred_transformed', tf.cast(tf.nn.softmax(seg_pred)[1:2, :, :, 1:2], tf.float16))
+        if train_flag == 2:
+            tf.summary.image('pred_main', tf.cast(tf.nn.softmax(seg_pred)[0:1, :, :, 1:2], tf.float16))
+            tf.summary.image('pred_transformed', tf.cast(tf.nn.softmax(seg_pred)[1:2, :, :, 1:2], tf.float16))
+        elif train_flag == 1:
+            tf.summary.image('pred_transformed', tf.cast(tf.nn.softmax(seg_pred)[1:2, :, :, 1:2], tf.float16))
+        elif train_flag == 0:
+            tf.summary.image('pred_main', tf.cast(tf.nn.softmax(seg_pred)[0:1, :, :, 1:2], tf.float16))
 
-        bp_step, grad_acc_op = self._optimize(total_loss, acc_count, global_step)
+        bp_step, grad_acc_op = self._optimize(total_loss, acc_count, global_step, train_flag)
 
         return total_loss, bp_step, grad_acc_op
 
-    def _optimize(self, loss, acc_count, global_step):
+    def _optimize(self, loss, acc_count, global_step, train_flag):
         '''
         :param loss: the network loss
         :return: a train op, a grad_acc_op
@@ -477,37 +492,59 @@ class ResNet():
         grads_vars = optimizer.compute_gradients(loss)
 
         # create grad accumulator for each variable-grad pair
-        grad_accumulator = {}
+        grad_accumulator_0 = {}
+        grad_accumulator_1 = {}
+        grad_accumulator_2 = {}
         for idx in range(len(grads_vars)):
             if grads_vars[idx][0] is not None:
-                grad_accumulator[idx] = tf.ConditionalAccumulator(grads_vars[idx][0].dtype)
+                var_name = str(grads_vars[idx][1].name).split(':')[0]
+                if var_name.find('main') != -1:
+                    grad_accumulator_0[idx] = tf.ConditionalAccumulator(grads_vars[idx][0].dtype)
+                elif var_name.find('optical_flow') != -1 or var_name.find('feat_transform') != -1:
+                    grad_accumulator_1[idx] = tf.ConditionalAccumulator(grads_vars[idx][0].dtype)
+                elif var_name.find('classifier') != -1:
+                    grad_accumulator_2[idx] = tf.ConditionalAccumulator(grads_vars[idx][0].dtype)
         # apply gradient to each grad accumulator
         layer_lr = nn.param_lr()
-        grad_accumulator_op = []
-        grad_accumulator_0 = []
-        grad_accumulator_1 = []
-        grad_accumulator_2 = []
-        for var_idx, grad_acc in grad_accumulator.iteritems():
+        grad_accumulator_ops = []
+        grad_accumulator_op0 = []
+        grad_accumulator_op1 = []
+        grad_accumulator_op2 = []
+        for var_idx, grad_acc in grad_accumulator_0.iteritems():
             var_name = str(grads_vars[var_idx][1].name).split(':')[0]
             var_grad = grads_vars[var_idx][0]
-            if var_name.find('main') != 0:
-                grad_accumulator_0.append(grad_acc.apply_grad(var_grad * layer_lr[var_name], local_step=global_step))
-            elif var_name.find('optical_flow') != 0 or var_name.find('feat_transform') != 0:
-                grad_accumulator_1.append(grad_acc.apply_grad(var_grad * layer_lr[var_name], local_step=global_step))
-            elif var_name.find('classifier') != 0:
-                grad_accumulator_2.append(grad_acc.apply_grad(var_grad * layer_lr[var_name], local_step=global_step))
-        grad_accumulator_op.append(grad_accumulator_0)
-        grad_accumulator_op.append(grad_accumulator_1)
-        grad_accumulator_op.append(grad_accumulator_2)
+            grad_accumulator_op0.append(grad_acc.apply_grad(var_grad * layer_lr[var_name], local_step=global_step))
+        for var_idx, grad_acc in grad_accumulator_1.iteritems():
+            var_name = str(grads_vars[var_idx][1].name).split(':')[0]
+            var_grad = grads_vars[var_idx][0]
+            grad_accumulator_op1.append(grad_acc.apply_grad(var_grad * layer_lr[var_name], local_step=global_step))
+        for var_idx, grad_acc in grad_accumulator_2.iteritems():
+            var_name = str(grads_vars[var_idx][1].name).split(':')[0]
+            var_grad = grads_vars[var_idx][0]
+            grad_accumulator_op2.append(grad_acc.apply_grad(var_grad * layer_lr[var_name], local_step=global_step))
+        grad_accumulator_ops.append(grad_accumulator_op0)
+        grad_accumulator_ops.append(grad_accumulator_op1)
+        grad_accumulator_ops.append(grad_accumulator_op2)
         # take average gradients for each variable after accumulating count reaches
-        mean_grads_vars = []
-        for var_idx, grad_acc in grad_accumulator.iteritems():
-            mean_grads_vars.append((grad_acc.take_grad(acc_count), grads_vars[var_idx][1]))
+        mean_grads_vars_0 = []
+        mean_grads_vars_1 = []
+        mean_grads_vars_2 = []
+        for var_idx, grad_acc in grad_accumulator_0.iteritems():
+            mean_grads_vars_0.append((grad_acc.take_grad(acc_count), grads_vars[var_idx][1]))
+        for var_idx, grad_acc in grad_accumulator_1.iteritems():
+            mean_grads_vars_1.append((grad_acc.take_grad(acc_count), grads_vars[var_idx][1]))
+        for var_idx, grad_acc in grad_accumulator_2.iteritems():
+            mean_grads_vars_2.append((grad_acc.take_grad(acc_count), grads_vars[var_idx][1]))
 
         # apply average gradients to variables
-        update_op = optimizer.apply_gradients(mean_grads_vars, global_step=global_step)
+        if train_flag == 0:
+            update_op = optimizer.apply_gradients(mean_grads_vars_0+mean_grads_vars_2, global_step=global_step)
+        elif train_flag == 1:
+            update_op = optimizer.apply_gradients(mean_grads_vars_1+mean_grads_vars_2, global_step=global_step)
+        elif train_flag == 2:
+            update_op = optimizer.apply_gradients(mean_grads_vars_0+mean_grads_vars_1+mean_grads_vars_2, global_step=global_step)
 
-        return update_op, grad_accumulator_op
+        return update_op, grad_accumulator_ops
 
     def _balanced_cross_entropy(self, input_tensor, labels, weight, att):
         '''
@@ -538,13 +575,22 @@ class ResNet():
 
         return tf.reduce_mean(balanced_loss)
 
-    def _l2_loss(self):
+    def _l2_loss(self, train_flag):
 
         l2_losses = []
         for var in tf.trainable_variables():
             # only regularize conv kernels
             if str(var.name).split(':')[0].find('bias') == -1:
-                l2_losses.append(tf.nn.l2_loss(var))
+                if train_flag == 0: # add main and classifier
+                    if str(var.name).split(':')[0].find('main') != -1 or str(var.name).split(':')[0].find('classifier') != -1:
+                        l2_losses.append(tf.nn.l2_loss(var))
+                elif train_flag == 1: # add optical_flow, feat_transform and classifier
+                    if str(var.name).split(':')[0].find('optical_flow') != -1 or \
+                            str(var.name).split(':')[0].find('feat_transform') != -1 or \
+                            str(var.name).split(':')[0].find('classifier') != -1:
+                        l2_losses.append(tf.nn.l2_loss(var))
+                elif train_flag == 2: # add all
+                    l2_losses.append(tf.nn.l2_loss(var))
         loss = tf.multiply(self._l2_weight, tf.add_n(l2_losses))
         tf.summary.scalar('l2_loss', loss)
 

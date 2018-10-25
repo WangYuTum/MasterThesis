@@ -15,6 +15,30 @@ sys.path.append("..")
 from dataset import DAVIS_dataset
 from core import resnet
 from core.nn import get_imgnet_var
+from core.nn import get_full_var
+from core.nn import get_OF_Feat_Adam
+from core.nn import get_main_Adam
+from tensorflow.python import pywrap_tensorflow
+
+################
+# train main:
+# lr = 1e-5;
+# 1ep
+#
+#
+# train of:
+# lr = 5e-5
+# 5ep
+
+################
+# parse argument
+conf_train_flag = int(sys.argv[1]) # 0 for main, 1 for OF/Feat_trans
+conf_epochs = int(sys.argv[2]) # 2 for main, 5 for OF/Feat_trans
+conf_lr = float(sys.argv[3]) # 1e-5 for main, 5e-5 for OF/Feat_trans
+conf_save_ckpt_interval = int(sys.argv[4]) # 1200(2ep) for main, 3000(5ep) for OF/Feat_trans
+conf_restore_ckpt = str(sys.argv[5]) # only change the suffix of saved ckpt file
+conf_l2 = float(sys.argv[6]) # 0.0005 for main, 0.0002 for OF/Feat_trans
+conf_tsboard_save = str(sys.argv[7])
 
 # config device
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
@@ -32,16 +56,16 @@ with tf.device('/cpu:0'):
 # config train params
 params_model = {
     'batch': 1, # feed a random pair of images at a time
-    'l2_weight': 0.0005,
-    'init_lr': 5e-5,
+    'l2_weight': conf_l2,
+    'init_lr': conf_lr,
     'data_format': 'NCHW', # optimal for cudnn
     'save_path': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large_Flowside/att_bin.ckpt',
-    'tsboard_logs': '../data/tsboard_logs/attention_bin/CNN-part-gate-img-v4_large_Flowin',
-    'restore_0': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large/att_bin.ckpt-24000', # restore model from where
+    'tsboard_logs': '../data/tsboard_logs/attention_bin/CNN-part-gate-img-v4_large_Flowside/'+conf_tsboard_save,
+    'restore_0': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large_Flowside/'+conf_restore_ckpt,
     'restore_parent_bin': '../data/ckpts/xxx.ckpt'
 }
 # define epochs
-epochs = 60
+epochs = conf_epochs
 frames_per_seq = 100 # each seq is extended to 100 frames by padding previous frames inversely
 steps_per_seq = 10 # because accumulate gradients 10 times before BP
 num_seq = 60
@@ -49,7 +73,7 @@ steps_per_ep = num_seq * steps_per_seq
 acc_count = 10 # accumulate 10 gradients
 total_steps = epochs * steps_per_ep # total steps of BP, 60000
 global_step = tf.Variable(0, name='global_step', trainable=False) # incremented automatically by 1 after 1 BP
-save_ckpt_interval = 3000 # corresponds to 5 epoch
+save_ckpt_interval = conf_save_ckpt_interval # corresponds to 2 epoch
 summary_write_interval = 20
 print_screen_interval = 10
 
@@ -77,15 +101,28 @@ sum_mask_w = tf.summary.image('mask_w', tf.cast(feed_mask_w, tf.float16))
 # build network, on GPU by default
 model = resnet.ResNet(params_model)
 loss, bp_step, grad_acc_op = model.train(feed_img, feed_seg, feed_weight, feed_att, feed_flow, feed_mask,
-                                         feed_mask_w, global_step, acc_count, 2)
+                                         feed_mask_w, global_step, acc_count, conf_train_flag)
 init_op = tf.global_variables_initializer()
 sum_all = tf.summary.merge_all()
 
 sum_train_flag = tf.summary.scalar('train_flag', feed_train_flag)
 
+
+reader = pywrap_tensorflow.NewCheckpointReader(params_model['restore_0'])
+if conf_train_flag == 0: # get OF/Feat_trans Adams
+    dummy_adam = get_OF_Feat_Adam(reader)
+elif conf_train_flag == 1: # get main Adams
+    dummy_adam = get_main_Adam(reader)
+
 # define saver
-saver_tmp = tf.train.Saver(var_list=get_imgnet_var())
+saver_tmp = tf.train.Saver()
 saver_parent = tf.train.Saver(max_to_keep=20)
+
+# initialize adam betas because of bad historical ckpt
+with tf.variable_scope('', reuse=tf.AUTO_REUSE):
+    beta1 = tf.get_variable('beta1_power', shape=[], initializer=tf.constant_initializer(0.9))
+    beta2 = tf.get_variable('beta2_power', shape=[], initializer=tf.constant_initializer(0.999))
+init_betas = tf.initializers.variables([beta1, beta2], name='init_betas')
 
 # run the session
 with tf.Session(config=config_gpu) as sess:
@@ -96,9 +133,10 @@ with tf.Session(config=config_gpu) as sess:
     saver_tmp.restore(sess, params_model['restore_0'])
     print('restored variables from {}'.format(params_model['restore_0']))
     print('All weights initialized.')
+    sess.run(init_betas)
 
     print("Starting training for {0} epochs, {1} total steps.".format(epochs, total_steps))
-    train_flag = 2
+    train_flag = conf_train_flag
     for ep in range(epochs):
         print("Epoch {} ...".format(ep))
         # train steps for each epoch
@@ -131,11 +169,16 @@ with tf.Session(config=config_gpu) as sess:
             if global_step.eval() % print_screen_interval == 0:
                 print("Global step {0} loss: {1}".format(global_step.eval(), loss_))
             # save .ckpt
-            if global_step.eval() % save_ckpt_interval == 0 and global_step.eval() != 0:
-                saver_parent.save(sess=sess,
-                                  save_path=params_model['save_path'],
-                                  global_step=global_step,
-                                  write_meta_graph=False)
-                print('Saved checkpoint.')
+            # if global_step.eval() % save_ckpt_interval == 0 and global_step.eval() != 0:
+            #     saver_parent.save(sess=sess,
+            #                       save_path=params_model['save_path'],
+            #                       global_step=global_step,
+            #                       write_meta_graph=False)
+            #     print('Saved checkpoint.')
     print('Finished training.')
+    saver_parent.save(sess=sess,
+                      save_path=params_model['save_path'],
+                      global_step=global_step,
+                      write_meta_graph=False)
+    print('Saved checkpoint on global_step {0}'.format(global_step.eval()))
 

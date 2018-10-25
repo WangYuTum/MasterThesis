@@ -186,8 +186,8 @@ class DAVIS_dataset():
             of = np.fliplr(of)
             of = np.concatenate((-of[:,:,0:1], of[:,:,1:2]), axis=-1)
             stacked = np.fliplr(stacked)
-        img_H = np.shape(img1)[0]
-        img_W = np.shape(img1)[1]
+        img_H = int(np.shape(img1)[0] / 2)
+        img_W = int(np.shape(img1)[1] / 2)
         scale = get_scale()
         new_H = int(img_H * scale)
         new_W = int(img_W * scale)
