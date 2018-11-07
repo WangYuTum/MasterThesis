@@ -159,69 +159,6 @@ class ResNet():
                 main_feat_out = nn.conv_layer(self._data_format, concat_seg_feat, 1, 'SAME', [1, 1, 64, 64], train_flag)
                 main_feat_out = nn.bias_layer(self._data_format, main_feat_out, 64, train_flag)
 
-        with tf.variable_scope('optical_flow'):
-            shape_dict['B0_of'] = {}
-            shape_dict['B0_of'][0] = [3, 3, 2, 8]
-            shape_dict['B0_of'][1] = [1, 1, 8, 8]
-            with tf.variable_scope('B0'):
-                with tf.variable_scope('conv1'):
-                    model['B0_of_1'] = nn.conv_layer(self._data_format, flow_in, 1, 'SAME', shape_dict['B0_of'][0], train_flag)
-                with tf.variable_scope('conv2'):
-                    model['B0_of_2'] = nn.conv_layer(self._data_format, model['B0_of_1'], 1, 'SAME',
-                                                     shape_dict['B0_of'][1], train_flag)
-            # Pooling 1
-            model['B0_of_pooled'] = nn.max_pool2d(self._data_format, model['B0_of_2'], 2, 'SAME')
-
-            shape_dict['B1_of'] = {}
-            shape_dict['B1_of'][0] = [3, 3, 8, 16]
-            shape_dict['B1_of'][1] = [1, 1, 16, 16]
-            with tf.variable_scope('B1'):
-                with tf.variable_scope('conv1'):
-                    model['B1_of_1'] = nn.conv_layer(self._data_format, model['B0_of_pooled'], 1, 'SAME',
-                                                     shape_dict['B1_of'][0], train_flag)
-                with tf.variable_scope('conv2'):
-                    model['B1_of_2'] = nn.conv_layer(self._data_format, model['B1_of_1'], 1, 'SAME',
-                                                     shape_dict['B1_of'][1], train_flag)
-            # Pooling 2
-            model['B1_of_pooled'] = nn.max_pool2d(self._data_format, model['B1_of_2'], 2, 'SAME')
-
-            shape_dict['B2_of'] = {}
-            shape_dict['B2_of'][0] = [3, 3, 16, 32]
-            shape_dict['B2_of'][1] = [1, 1, 32, 32]
-            with tf.variable_scope('B2'):
-                with tf.variable_scope('conv1'):
-                    model['B2_of_1'] = nn.conv_layer(self._data_format, model['B1_of_pooled'], 1, 'SAME',
-                                                     shape_dict['B2_of'][0], train_flag)
-                with tf.variable_scope('conv2'):
-                    model['B2_of_2'] = nn.conv_layer(self._data_format, model['B2_of_1'], 1, 'SAME',
-                                                     shape_dict['B2_of'][1], train_flag)
-            # Pooling 3
-            model['B2_of_pooled'] = nn.max_pool2d(self._data_format, model['B2_of_2'], 2, 'SAME')
-
-            shape_dict['B3_of'] = {}
-            shape_dict['B3_of'][0] = [3, 3, 32, 64]
-            shape_dict['B3_of'][1] = [1, 1, 64, 64]
-            with tf.variable_scope('B3'):
-                with tf.variable_scope('conv1'):
-                    model['B3_of_1'] = nn.conv_layer(self._data_format, model['B2_of_pooled'], 1, 'SAME',
-                                                     shape_dict['B3_of'][0], train_flag)
-                with tf.variable_scope('conv2'):
-                    model['B3_of_2'] = nn.conv_layer(self._data_format, model['B3_of_1'], 1, 'SAME',
-                                                     shape_dict['B3_of'][1], train_flag)
-            # Pooling 4
-            model['B3_of_pooled'] = nn.max_pool2d(self._data_format, model['B3_of_2'], 2, 'SAME')
-
-            shape_dict['B4_of'] = {}
-            shape_dict['B4_of'][0] = [3, 3, 64, 128]
-            shape_dict['B4_of'][1] = [1, 1, 128, 128]
-            with tf.variable_scope('B4'):
-                with tf.variable_scope('conv1'):
-                    model['B4_of_1'] = nn.conv_layer(self._data_format, model['B3_of_pooled'], 1, 'SAME',
-                                                     shape_dict['B4_of'][0], train_flag)
-                with tf.variable_scope('conv2'):
-                    model['B4_of_2'] = nn.conv_layer(self._data_format, model['B4_of_1'], 1, 'SAME',
-                                                     shape_dict['B4_of'][1], train_flag)
-
         with tf.variable_scope('feat_transform'):
             with tf.variable_scope('B0'):
                 # concat feat_0 and optical_flow

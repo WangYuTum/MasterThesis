@@ -20,17 +20,6 @@ from core.nn import get_OF_Feat_Adam
 from core.nn import get_main_Adam
 from tensorflow.python import pywrap_tensorflow
 
-################
-# train main:
-# lr = 1e-5;
-# 1ep
-#
-#
-# train of:
-# lr = 5e-5
-# 5ep
-
-################
 # parse argument
 conf_train_flag = int(sys.argv[1]) # 0 for main, 1 for OF/Feat_trans
 conf_epochs = int(sys.argv[2]) # 2 for main, 5 for OF/Feat_trans
