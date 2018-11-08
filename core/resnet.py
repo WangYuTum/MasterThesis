@@ -33,8 +33,8 @@ class ResNet():
         :param images: [2,H,W,3], tf.float32, img(t+1), img(t)
         :param atts: [2,H,W,1], tf.int32, att for img(t+1), img(t)
         :param flowin: [1,H,W,2], tf.float32, Flow for img(t)
-        :param train_flag: 0:train main, 1:train OF, 2:train all, 3:no train all
-        :return: segmentation output before softmax
+        :param train_flag: 0:train main, 1:train trans, 2:train all, 3:no train all
+        :return: activation_map output before softmax
         '''
         model = {}
 
@@ -161,147 +161,94 @@ class ResNet():
 
         with tf.variable_scope('feat_transform'):
             with tf.variable_scope('B0'):
-                # concat feat_0 and optical_flow
-                if self._data_format == "NCHW":
-                    concat_feat_flow_0 = tf.concat([model['B0'][1:2,:,:,:], model['B0_of_2']], axis=1)
-                else:
-                    concat_feat_flow_0 = tf.concat([model['B0'][1:2,:,:,:], model['B0_of_2']], axis=3)
-                shape_dict['B0_transform'] = [3, 3, 64+8, 64]
-                with tf.variable_scope('conv1'):
-                    model['B0_trans_1'] = nn.conv_layer(self._data_format, concat_feat_flow_0, 1, 'SAME',
-                                                    shape_dict['B0_transform'], train_flag)
+                # feature map displacement using optical flow, original size
+                B0_trans_feat = self.flow_disp(model['B0'][1:2,:,:,:], flow_in)
+                # pool 1/4
+                B0_trans_feat = nn.max_pool2d_4(self._data_format, B0_trans_feat, 4, 'SAME')
+                # conv to resize feat channels
+                shape_dict['B0_transform'] = [3, 3, 64, 256]
+                with tf.variable_scope('conv_resize'):
+                    model['B0_trans'] = nn.conv_layer(self._data_format, B0_trans_feat, 1, 'SAME',
+                                                        shape_dict['B0_transform'], train_flag)
             with tf.variable_scope('B1'):
-                if self._data_format == "NCHW":
-                    concat_feat_flow_1 = tf.concat([model['B1_2'][1:2,:,:,:], model['B1_of_2']], axis=1)
-                else:
-                    concat_feat_flow_1 = tf.concat([model['B1_2'][1:2,:,:,:], model['B1_of_2']], axis=3)
-                shape_dict['B1_transform'] = {}
-                shape_dict['B1_transform'][0] = [3, 3, 128+16, 128]
-                shape_dict['B1_transform'][1] = [3, 3, 128, 128]
-                with tf.variable_scope('conv1'):
-                    model['B1_trans_1'] = nn.conv_layer(self._data_format, concat_feat_flow_1, 1, 'SAME',
-                                                      shape_dict['B1_transform'][0], train_flag)
-                with tf.variable_scope('conv2'):
-                    model['B1_trans_2'] = nn.conv_layer(self._data_format, model['B1_trans_1'], 1, 'SAME',
-                                                        shape_dict['B1_transform'][1], train_flag)
-
+                # feature map displacement using optical flow, 1/2 size
+                in_flow = nn.avg_pool2d(self._data_format, flow_in, 2, 2, 'SAME')
+                B1_trans_feat = self.flow_disp(model['B1_2'][1:2, :, :, :], in_flow)
+                # pool from 1/2 to 1/4
+                B1_trans_feat = nn.max_pool2d(self._data_format, B1_trans_feat, 2, 'SAME')
+                # conv to resize feat channels
+                shape_dict['B1_transform'] = [3, 3, 128, 256]
+                with tf.variable_scope('conv_resize'):
+                    model['B1_trans'] = nn.conv_layer(self._data_format, B1_trans_feat, 1, 'SAME',
+                                                      shape_dict['B1_transform'], train_flag)
             with tf.variable_scope('B2'):
-                if self._data_format == "NCHW":
-                    concat_feat_flow_2 = tf.concat([model['B2_2'][1:2,:,:,:], model['B2_of_2']], axis=1)
-                else:
-                    concat_feat_flow_2 = tf.concat([model['B2_2'][1:2,:,:,:], model['B2_of_2']], axis=3)
-                shape_dict['B2_transform'] = {}
-                shape_dict['B2_transform'][0] = [3, 3, 256+32, 256]
-                shape_dict['B2_transform'][1] = [3, 3, 256, 256]
-                shape_dict['B2_transform'][2] = [3, 3, 256, 256]
-                with tf.variable_scope('conv1'):
-                    model['B2_trans_1'] = nn.conv_layer(self._data_format, concat_feat_flow_2, 1, 'SAME',
-                                                        shape_dict['B2_transform'][0], train_flag)
-                with tf.variable_scope('conv2'):
-                    model['B2_trans_2'] = nn.conv_layer(self._data_format, model['B2_trans_1'], 1, 'SAME',
-                                                        shape_dict['B2_transform'][1], train_flag)
-                with tf.variable_scope('conv3'):
-                    model['B2_trans_3'] = nn.conv_layer(self._data_format, model['B2_trans_2'], 1, 'SAME',
-                                                        shape_dict['B2_transform'][2], train_flag)
-
+                # feature map displacement using optical flow, 1/4 size
+                in_flow = nn.avg_pool2d(self._data_format, flow_in, 4, 4, 'SAME')
+                B2_trans_feat = self.flow_disp(model['B2_2'][1:2, :, :, :], in_flow)
+                # no further pool needed, size 1/4, conv to resize feat channels
+                shape_dict['B2_transform'] = [3, 3, 256, 256]
+                with tf.variable_scope('conv_resize'):
+                    model['B2_trans'] = nn.conv_layer(self._data_format, B2_trans_feat, 1, 'SAME',
+                                                      shape_dict['B2_transform'], train_flag)
             with tf.variable_scope('B3'):
+                # feature map displacement using optical flow, 1/8 size
+                in_flow = nn.avg_pool2d(self._data_format, flow_in, 8, 8, 'SAME')
+                B3_trans_feat = self.flow_disp(model['B3_5'][1:2, :, :, :], in_flow)
+                # resize from 1/8 to 1/4, x2
                 if self._data_format == "NCHW":
-                    concat_feat_flow_3 = tf.concat([model['B3_5'][1:2,:,:,:], model['B3_of_2']], axis=1)
-                else:
-                    concat_feat_flow_3 = tf.concat([model['B3_5'][1:2,:,:,:], model['B3_of_2']], axis=3)
-                shape_dict['B3_transform'] = {}
-                shape_dict['B3_transform'][0] = [3, 3, 512+64, 512]
-                shape_dict['B3_transform'][1] = [3, 3, 512, 512]
-                shape_dict['B3_transform'][2] = [3, 3, 512, 512]
-                shape_dict['B3_transform'][3] = [3, 3, 512, 512]
-                with tf.variable_scope('conv1'):
-                    model['B3_trans_1'] = nn.conv_layer(self._data_format, concat_feat_flow_3, 1, 'SAME',
-                                                        shape_dict['B3_transform'][0], train_flag)
-                with tf.variable_scope('conv2'):
-                    model['B3_trans_2'] = nn.conv_layer(self._data_format, model['B3_trans_1'], 1, 'SAME',
-                                                        shape_dict['B3_transform'][1], train_flag)
-                with tf.variable_scope('conv3'):
-                    model['B3_trans_3'] = nn.conv_layer(self._data_format, model['B3_trans_2'], 1, 'SAME',
-                                                        shape_dict['B3_transform'][2], train_flag)
-                with tf.variable_scope('conv4'):
-                    model['B3_trans_4'] = nn.conv_layer(self._data_format, model['B3_trans_3'], 1, 'SAME',
-                                                        shape_dict['B3_transform'][3], train_flag)
-
+                    B3_trans_feat = tf.transpose(B3_trans_feat, [0, 2, 3, 1])  # To NHWC
+                    B3_trans_feat = tf.image.resize_images(B3_trans_feat, [int(im_size[1]/4), int(im_size[2]/4)]) # NHWC
+                    B3_trans_feat = tf.transpose(B3_trans_feat, [0, 3, 1, 2])  # To NCHW
+                # conv to resize feat channels
+                shape_dict['B3_transform'] = [3, 3, 512, 256]
+                with tf.variable_scope('conv_resize'):
+                    model['B3_trans'] = nn.conv_layer(self._data_format, B3_trans_feat, 1, 'SAME',
+                                                      shape_dict['B3_transform'], train_flag)
             with tf.variable_scope('B4'):
+                # feature map displacement using optical flow, 1/16 size
+                in_flow = nn.avg_pool2d(self._data_format, flow_in, 16, 16, 'SAME')
+                B4_trans_feat = self.flow_disp(model['B4_2'][1:2, :, :, :], in_flow)
+                # resize from 1/16 to 1/4, x4
                 if self._data_format == "NCHW":
-                    concat_feat_flow_4 = tf.concat([model['B4_2'][1:2,:,:,:], model['B4_of_2']], axis=1)
-                else:
-                    concat_feat_flow_4 = tf.concat([model['B4_2'][1:2,:,:,:], model['B4_of_2']], axis=3)
-                shape_dict['B4_transform'] = {}
-                shape_dict['B4_transform'][0] = [3, 3, 1024+128, 1024]
-                shape_dict['B4_transform'][1] = [3, 3, 1024, 512]
-                shape_dict['B4_transform'][2] = [3, 3, 512, 512]
-                shape_dict['B4_transform'][3] = [3, 3, 512, 1024]
-                with tf.variable_scope('conv1'):
-                    model['B4_trans_1'] = nn.conv_layer(self._data_format, concat_feat_flow_4, 1, 'SAME',
-                                                        shape_dict['B4_transform'][0], train_flag)
-                with tf.variable_scope('conv2'):
-                    model['B4_trans_2'] = nn.conv_layer(self._data_format, model['B4_trans_1'], 1, 'SAME',
-                                                        shape_dict['B4_transform'][1], train_flag)
-                with tf.variable_scope('conv3'):
-                    model['B4_trans_3'] = nn.conv_layer(self._data_format, model['B4_trans_2'], 1, 'SAME',
-                                                        shape_dict['B4_transform'][2], train_flag)
-                with tf.variable_scope('conv4'):
-                    model['B4_trans_4'] = nn.conv_layer(self._data_format, model['B4_trans_3'], 1, 'SAME',
-                                                        shape_dict['B4_transform'][3], train_flag)
-
-
-            # aggregate all feature on diff levels
-            with tf.variable_scope('B0_trans_side_path'):
-                trans_side_0 = nn.conv_layer(self._data_format, model['B0_trans_1'], 1, 'SAME', [3, 3, 64, 16], train_flag)
-                trans_side_0_f = nn.bias_layer(self._data_format, trans_side_0, 16, train_flag)
-
-            with tf.variable_scope('B1_trans_side_path'):
-                trans_side_2 = nn.conv_layer(self._data_format, model['B1_trans_2'], 1, 'SAME', [3, 3, 128, 16], train_flag)
-                trans_side_2 = nn.bias_layer(self._data_format, trans_side_2, 16, train_flag)
-                if self._data_format == "NCHW":
-                    trans_side_2 = tf.transpose(trans_side_2, [0, 2, 3, 1])  # To NHWC
-                    trans_side_2_f = tf.image.resize_images(trans_side_2, [im_size[1], im_size[2]])  # NHWC
-                    trans_side_2_f = tf.transpose(trans_side_2_f, [0, 3, 1, 2])  # To NCHW
-                else:
-                    trans_side_2_f = tf.image.resize_images(trans_side_2, [im_size[1], im_size[2]])  # NHWC
-            with tf.variable_scope('B2_trans_side_path'):
-                trans_side_4 = nn.conv_layer(self._data_format, model['B2_trans_3'], 1, 'SAME', [3, 3, 256, 16], train_flag)
-                trans_side_4 = nn.bias_layer(self._data_format, trans_side_4, 16, train_flag)
-                if self._data_format == "NCHW":
-                    trans_side_4 = tf.transpose(trans_side_4, [0, 2, 3, 1])  # To NHWC
-                    trans_side_4_f = tf.image.resize_images(trans_side_4, [im_size[1], im_size[2]])  # NHWC
-                    trans_side_4_f = tf.transpose(trans_side_4_f, [0, 3, 1, 2])  # To NCHW
-                else:
-                    trans_side_4_f = tf.image.resize_images(trans_side_4, [im_size[1], im_size[2]])  # NHWC
-            with tf.variable_scope('B3_trans_side_path'):
-                trans_side_8 = nn.conv_layer(self._data_format, model['B3_trans_4'], 1, 'SAME', [3, 3, 512, 16], train_flag)
-                trans_side_8 = nn.bias_layer(self._data_format, trans_side_8, 16, train_flag)
-                if self._data_format == "NCHW":
-                    trans_side_8 = tf.transpose(trans_side_8, [0, 2, 3, 1])  # To NHWC
-                    trans_side_8_f = tf.image.resize_images(trans_side_8, [im_size[1], im_size[2]])  # NHWC
-                    trans_side_8_f = tf.transpose(trans_side_8_f, [0, 3, 1, 2])  # To NCHW
-                else:
-                    trans_side_8_f = tf.image.resize_images(trans_side_8, [im_size[1], im_size[2]])  # NHWC
-            with tf.variable_scope('B4_trans_side_path'):
-                trans_side_16 = nn.conv_layer(self._data_format, model['B4_trans_4'], 1, 'SAME', [3, 3, 1024, 16], train_flag)
-                trans_side_16 = nn.bias_layer(self._data_format, trans_side_16, 16, train_flag)
-                if self._data_format == "NCHW":
-                    trans_side_16 = tf.transpose(trans_side_16, [0, 2, 3, 1])  # To NHWC
-                    trans_side_16_f = tf.image.resize_images(trans_side_16, [im_size[1], im_size[2]])  # NHWC
-                    trans_side_16_f = tf.transpose(trans_side_16_f, [0, 3, 1, 2])  # To NCHW
-                else:
-                    trans_side_16_f = tf.image.resize_images(trans_side_16, [im_size[1], im_size[2]])  # NHWC
-            # concat and linearly fuse
+                    B4_trans_feat = tf.transpose(B4_trans_feat, [0, 2, 3, 1])  # To NHWC
+                    B4_trans_feat = tf.image.resize_images(B4_trans_feat, [int(im_size[1]/4), int(im_size[2]/4)]) # NHWC
+                    B4_trans_feat = tf.transpose(B4_trans_feat, [0, 3, 1, 2])  # To NCHW
+                # conv to resize feat channels
+                shape_dict['B4_transform'] = [3, 3, 1024, 256]
+                with tf.variable_scope('conv_resize'):
+                    model['B4_trans'] = nn.conv_layer(self._data_format, B4_trans_feat, 1, 'SAME',
+                                                      shape_dict['B4_transform'], train_flag)
+            # concat all displaced features
             if self._data_format == "NCHW":
-                concat_trans_feat = tf.concat([trans_side_0_f, trans_side_2_f, trans_side_4_f,
-                                               trans_side_8_f, trans_side_16_f], axis=1)
+                concat_trans_feat = tf.concat([model['B0_trans'], model['B1_trans'], model['B2_trans'], model['B3_trans'], model['B4_trans']], axis=1)
             else:
-                concat_trans_feat = tf.concat([trans_side_0_f, trans_side_2_f, trans_side_4_f,
-                                               trans_side_8_f, trans_side_16_f], axis=3)
+                concat_trans_feat = tf.concat([model['B0_trans'], model['B1_trans'], model['B2_trans'], model['B3_trans'], model['B4_trans']], axis=3)
+            # feat_trans_fuse, 3 convs
             with tf.variable_scope('fuse'):
-                trans_feat_out = nn.conv_layer(self._data_format, concat_trans_feat, 1, 'SAME', [1, 1, 80, 64], train_flag)
-                trans_feat_out = nn.bias_layer(self._data_format, trans_feat_out, 64, train_flag)
+                with tf.variable_scope('conv1'):
+                    fuse1_out = nn.conv_layer(self._data_format, concat_trans_feat, 1, 'SAME',
+                                              [3, 3, 1024, 512], train_flag)
+                    fuse1_out = nn.bias_layer(self._data_format, fuse1_out, 512, train_flag)
+                    fuse1_out = nn.ReLu_layer(fuse1_out)
+                with tf.variable_scope('conv2'):
+                    fuse2_out = nn.conv_layer(self._data_format, fuse1_out, 1, 'SAME',
+                                              [3, 3, 512, 512], train_flag)
+                    fuse2_out = nn.bias_layer(self._data_format, fuse2_out, 512, train_flag)
+                    fuse2_out = nn.ReLu_layer(fuse2_out)
+                with tf.variable_scope('conv3'):
+                    fuse3_out = nn.conv_layer(self._data_format, fuse2_out, 1, 'SAME',
+                                              [3, 3, 512, 512], train_flag)
+                    fuse3_out = nn.bias_layer(self._data_format, fuse3_out, 512, train_flag)
+                    fuse3_out = nn.ReLu_layer(fuse3_out)
+                # resize to img_size and conv to 64 channels
+                if self._data_format == "NCHW":
+                    fuse3_out = tf.transpose(fuse3_out, [0, 2, 3, 1])  # To NHWC
+                    fuse3_out = tf.image.resize_images(fuse3_out, [im_size[1], im_size[2]])  # NHWC
+                    fuse3_out = tf.transpose(fuse3_out, [0, 3, 1, 2])  # To NCHW
+                with tf.variable_scope('fuse_trans'):
+                    trans_feat_out = nn.conv_layer(self._data_format, fuse3_out, 1, 'SAME', [1, 1, 512, 64],
+                                                  train_flag)
+                    trans_feat_out = nn.bias_layer(self._data_format, trans_feat_out, 64, train_flag)
 
         # classification loss
         with tf.variable_scope('classifier'):
@@ -311,6 +258,37 @@ class ResNet():
 
 
         return seg_feat, seg_out
+
+    def flow_disp(self, feat_arr, flow_arr):
+        '''
+        :param feat_arr: [1,h,w,C] or [1,C,h,w]
+        :param flow_arr: [1,h,w,2] or [1,2,h,w]
+        :return: feat_arr: [1,h,w,C] or [1,C,h,w]
+        '''
+
+        if self._data_format == "NCHW":
+            feat_arr = tf.transpose(feat_arr, [0, 2, 3, 1]) # to NHWC
+            feat_arr = tf.squeeze(feat_arr, 0) # to HWC
+            flow_arr = tf.transpose(flow_arr, [0, 2, 3, 1]) # to NHW2
+            flow_arr = tf.squeeze(flow_arr, 0) # to HW2
+        feat_shape = tf.shape(feat_arr)
+        h = feat_shape[0]
+        w = feat_shape[1]
+        new_feat = tf.zeros_like(feat_arr)
+        for idx_h in range(h):
+            for idx_w in range(w):
+                motion_h = int(round(flow_arr[idx_h][idx_w][1]))
+                motion_w = int(round(flow_arr[idx_h][idx_w][0]))
+                new_h = idx_h + motion_h
+                new_w = idx_w + motion_w
+                if new_h < h and new_h >= 0 and new_w < w and new_w >= 0:
+                    new_feat[new_h][new_w] = feat_arr[idx_h][idx_w]
+        # reshape
+        if self._data_format == "NCHW":
+            new_feat = tf.transpose(new_feat, [2, 0, 1]) # from HWC to CHW
+            new_feat = tf.expand_dims(new_feat, 0) # to NCHW where N = 1
+
+        return new_feat
 
     def _att_gate(self, images, atts):
         '''
@@ -377,7 +355,7 @@ class ResNet():
         :param weight: [1,H,W,1], tf.float32, balance weight for trans_obj
         :param global_step: keep track of global train step
         :param acc_count: number of accumulated gradients
-        :param train_flag: 0:train main, 1:train OF, 2:train all, 3:no train all
+        :param train_flag: 0:train main, 1:train trans, 2:train all, 3:no train all
         :return: total_loss, train_step_op, grad_acc_op
         '''
         seg_feat, seg_out = self._build_model(feed_img, feed_att, flow_in, train_flag) # [2,2,H,W] or [2,H,W,2]
@@ -437,7 +415,7 @@ class ResNet():
                 var_name = str(grads_vars[idx][1].name).split(':')[0]
                 if var_name.find('main') != -1:
                     grad_accumulator_0[idx] = tf.ConditionalAccumulator(grads_vars[idx][0].dtype)
-                elif var_name.find('optical_flow') != -1 or var_name.find('feat_transform') != -1:
+                elif var_name.find('feat_transform') != -1:
                     grad_accumulator_1[idx] = tf.ConditionalAccumulator(grads_vars[idx][0].dtype)
                 elif var_name.find('classifier') != -1:
                     grad_accumulator_2[idx] = tf.ConditionalAccumulator(grads_vars[idx][0].dtype)
@@ -449,15 +427,15 @@ class ResNet():
         grad_accumulator_op2 = []
         for var_idx, grad_acc in grad_accumulator_0.iteritems():
             var_name = str(grads_vars[var_idx][1].name).split(':')[0]
-            var_grad = grads_vars[var_idx][0]
+            var_grad = tf.clip_by_value(grads_vars[var_idx][0], -1.0, 1.0)
             grad_accumulator_op0.append(grad_acc.apply_grad(var_grad * layer_lr[var_name], local_step=global_step))
         for var_idx, grad_acc in grad_accumulator_1.iteritems():
             var_name = str(grads_vars[var_idx][1].name).split(':')[0]
-            var_grad = grads_vars[var_idx][0]
+            var_grad = tf.clip_by_value(grads_vars[var_idx][0], -1.0, 1.0)
             grad_accumulator_op1.append(grad_acc.apply_grad(var_grad * layer_lr[var_name], local_step=global_step))
         for var_idx, grad_acc in grad_accumulator_2.iteritems():
             var_name = str(grads_vars[var_idx][1].name).split(':')[0]
-            var_grad = grads_vars[var_idx][0]
+            var_grad = tf.clip_by_value(grads_vars[var_idx][0], -1.0, 1.0)
             grad_accumulator_op2.append(grad_acc.apply_grad(var_grad * layer_lr[var_name], local_step=global_step))
         grad_accumulator_ops.append(grad_accumulator_op0)
         grad_accumulator_ops.append(grad_accumulator_op1)
@@ -522,8 +500,7 @@ class ResNet():
                     if str(var.name).split(':')[0].find('main') != -1 or str(var.name).split(':')[0].find('classifier') != -1:
                         l2_losses.append(tf.nn.l2_loss(var))
                 elif train_flag == 1: # add optical_flow, feat_transform and classifier
-                    if str(var.name).split(':')[0].find('optical_flow') != -1 or \
-                            str(var.name).split(':')[0].find('feat_transform') != -1 or \
+                    if str(var.name).split(':')[0].find('feat_transform') != -1 or \
                             str(var.name).split(':')[0].find('classifier') != -1:
                         l2_losses.append(tf.nn.l2_loss(var))
                 elif train_flag == 2: # add all

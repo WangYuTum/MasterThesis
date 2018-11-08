@@ -22,7 +22,7 @@ def conv_layer(data_format, input_tensor, stride=1, padding='SAME', shape=None, 
         else:
             trainable = False
     elif train_flag == 1:
-        if scope_name.find('optical_flow') != -1 or scope_name.find('feat_transform') != -1 or scope_name.find('classifier') != -1:
+        if scope_name.find('feat_transform') != -1 or scope_name.find('classifier') != -1:
             trainable = True
         else:
             trainable = False
@@ -119,6 +119,33 @@ def max_pool2d(data_format, input_tensor, stride=2, padding='SAME'):
 
     return out
 
+def max_pool2d_4(data_format, input_tensor, stride=4, padding='SAME'):
+    ''' The standard max_pool2d with kernel size 4x4 '''
+
+    if data_format == "NCHW":
+        pool_size = [1, 1, 4, 4]
+        pool_stride = [1, 1, stride, stride]
+    else:
+        pool_size = [1, 4, 4, 1]
+        pool_stride = [1, 4, 4, 1]
+
+    out = tf.nn.max_pool(input_tensor, pool_size, pool_stride, padding, data_format)
+
+    return out
+
+def avg_pool2d(data_format, input_tensor, size=2, stride=2, padding='SAME'):
+    ''' The standard avg_pool2d '''
+
+    if data_format == "NCHW":
+        pool_size = [1, 1, size, size]
+        pool_stride = [1, 1, stride, stride]
+    else:
+        pool_size = [1, size, size, 1]
+        pool_stride = [1, stride, stride, 1]
+
+    out = tf.nn.avg_pool(input_tensor, pool_size, pool_stride, padding, data_format)
+
+    return out
 
 def ReLu_layer(input_tensor):
 
@@ -138,7 +165,7 @@ def bias_layer(data_format, input_tensor, shape=None, train_flag=None):
         else:
             trainable = False
     elif train_flag == 1:
-        if scope_name.find('optical_flow') != -1 or scope_name.find('feat_transform') != -1 or scope_name.find('classifier') != -1:
+        if scope_name.find('feat_transform') != -1 or scope_name.find('classifier') != -1:
             trainable = True
         else:
             trainable = False
@@ -538,56 +565,22 @@ def param_lr():
     vars_lr['main/fuse/kernel'] = 1.0
     vars_lr['main/fuse/bias'] = 2.0
 
-    vars_lr['optical_flow/B0/conv1/kernel'] = 1.0
-    vars_lr['optical_flow/B0/conv2/kernel'] = 1.0
-    vars_lr['optical_flow/B1/conv1/kernel'] = 1.0
-    vars_lr['optical_flow/B1/conv2/kernel'] = 1.0
-    vars_lr['optical_flow/B2/conv1/kernel'] = 1.0
-    vars_lr['optical_flow/B2/conv2/kernel'] = 1.0
-    vars_lr['optical_flow/B3/conv1/kernel'] = 1.0
-    vars_lr['optical_flow/B3/conv2/kernel'] = 1.0
-    vars_lr['optical_flow/B4/conv1/kernel'] = 1.0
-    vars_lr['optical_flow/B4/conv2/kernel'] = 1.0
-    vars_lr['feat_transform/B0/conv1/kernel'] = 1.0
-    vars_lr['feat_transform/B1/conv1/kernel'] = 1.0
-    vars_lr['feat_transform/B1/conv2/kernel'] = 1.0
-    vars_lr['feat_transform/B2/conv1/kernel'] = 1.0
-    vars_lr['feat_transform/B2/conv2/kernel'] = 1.0
-    vars_lr['feat_transform/B2/conv3/kernel'] = 1.0
-    vars_lr['feat_transform/B3/conv1/kernel'] = 1.0
-    vars_lr['feat_transform/B3/conv2/kernel'] = 1.0
-    vars_lr['feat_transform/B3/conv3/kernel'] = 1.0
-    vars_lr['feat_transform/B3/conv4/kernel'] = 1.0
-    vars_lr['feat_transform/B4/conv1/kernel'] = 1.0
-    vars_lr['feat_transform/B4/conv2/kernel'] = 1.0
-    vars_lr['feat_transform/B4/conv3/kernel'] = 1.0
-    vars_lr['feat_transform/B4/conv4/kernel'] = 1.0
+    vars_lr['feat_transform/B0/conv_resize/kernel'] = 1.0
+    vars_lr['feat_transform/B1/conv_resize/kernel'] = 1.0
+    vars_lr['feat_transform/B2/conv_resize/kernel'] = 1.0
+    vars_lr['feat_transform/B3/conv_resize/kernel'] = 1.0
+    vars_lr['feat_transform/B4/conv_resize/kernel'] = 1.0
 
-    vars_lr['feat_transform/B0_trans_side_path/kernel'] = 1.0
-    vars_lr['feat_transform/B0_trans_side_path/bias'] = 2.0
-    vars_lr['feat_transform/B1_trans_side_path/kernel'] = 1.0
-    vars_lr['feat_transform/B1_trans_side_path/bias'] = 2.0
-    vars_lr['feat_transform/B2_trans_side_path/kernel'] = 1.0
-    vars_lr['feat_transform/B2_trans_side_path/bias'] = 2.0
-    vars_lr['feat_transform/B3_trans_side_path/kernel'] = 1.0
-    vars_lr['feat_transform/B3_trans_side_path/bias'] = 2.0
-    vars_lr['feat_transform/B4_trans_side_path/kernel'] = 1.0
-    vars_lr['feat_transform/B4_trans_side_path/bias'] = 2.0
-    vars_lr['feat_transform/fuse/kernel'] = 1.0
-    vars_lr['feat_transform/fuse/bias'] = 2.0
+    vars_lr['feat_transform/fuse/conv1/kernel'] = 1.0
+    vars_lr['feat_transform/fuse/conv1/bias'] = 2.0
+    vars_lr['feat_transform/fuse/conv2/kernel'] = 1.0
+    vars_lr['feat_transform/fuse/conv2/bias'] = 2.0
+    vars_lr['feat_transform/fuse/conv3/kernel'] = 1.0
+    vars_lr['feat_transform/fuse/conv3/bias'] = 2.0
+    vars_lr['feat_transform/fuse/fuse_trans/kernel'] = 1.0
+    vars_lr['feat_transform/fuse/fuse_trans/bias'] = 2.0
 
     vars_lr['classifier/kernel'] = 0.1
     vars_lr['classifier/bias'] = 0.2
 
     return vars_lr
-
-
-
-
-
-
-
-
-
-
-

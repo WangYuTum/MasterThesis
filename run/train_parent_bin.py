@@ -21,13 +21,19 @@ from core.nn import get_main_Adam
 from tensorflow.python import pywrap_tensorflow
 
 # parse argument
-conf_train_flag = int(sys.argv[1]) # 0 for main, 1 for OF/Feat_trans
-conf_epochs = int(sys.argv[2]) # 2 for main, 5 for OF/Feat_trans
-conf_lr = float(sys.argv[3]) # 1e-5 for main, 5e-5 for OF/Feat_trans
-conf_save_ckpt_interval = int(sys.argv[4]) # 1200(2ep) for main, 3000(5ep) for OF/Feat_trans
-conf_restore_ckpt = str(sys.argv[5]) # only change the suffix of saved ckpt file
-conf_l2 = float(sys.argv[6]) # 0.0005 for main, 0.0002 for OF/Feat_trans
-conf_tsboard_save = str(sys.argv[7])
+# conf_train_flag = int(sys.argv[1]) # 0 for main, 1 for OF/Feat_trans
+# conf_epochs = int(sys.argv[2]) # 2 for main, 5 for OF/Feat_trans
+# conf_lr = float(sys.argv[3]) # 1e-5 for main, 5e-5 for OF/Feat_trans
+# conf_save_ckpt_interval = int(sys.argv[4]) # 1200(2ep) for main, 3000(5ep) for OF/Feat_trans
+# conf_restore_ckpt = str(sys.argv[5]) # only change the suffix of saved ckpt file
+# conf_l2 = float(sys.argv[6]) # 0.0005 for main, 0.0002 for OF/Feat_trans
+# conf_tsboard_save = str(sys.argv[7])
+conf_train_flag = 0
+conf_epochs = 2
+conf_lr = 5e-6
+conf_save_ckpt_interval = 1200
+conf_l2 = 0.0002
+conf_tsboard_save = 'iter_0_main'
 
 # config device
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
@@ -48,9 +54,10 @@ params_model = {
     'l2_weight': conf_l2,
     'init_lr': conf_lr,
     'data_format': 'NCHW', # optimal for cudnn
-    'save_path': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large_Flowside/att_bin.ckpt',
+    'save_path': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large_Flowside/iter0_manul/att_bin.ckpt',
     'tsboard_logs': '../data/tsboard_logs/attention_bin/CNN-part-gate-img-v4_large_Flowside/'+conf_tsboard_save,
-    'restore_0': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large_Flowside/'+conf_restore_ckpt,
+    # 'restore_0': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large_Flowside/'+conf_restore_ckpt,
+    'restore_0': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large_Flowin/att_bin.ckpt-24000',
     'restore_parent_bin': '../data/ckpts/xxx.ckpt'
 }
 # define epochs
@@ -97,21 +104,21 @@ sum_all = tf.summary.merge_all()
 sum_train_flag = tf.summary.scalar('train_flag', feed_train_flag)
 
 
-reader = pywrap_tensorflow.NewCheckpointReader(params_model['restore_0'])
-if conf_train_flag == 0: # get OF/Feat_trans Adams
-    dummy_adam = get_OF_Feat_Adam(reader)
-elif conf_train_flag == 1: # get main Adams
-    dummy_adam = get_main_Adam(reader)
+# reader = pywrap_tensorflow.NewCheckpointReader(params_model['restore_0'])
+# if conf_train_flag == 0: # get OF/Feat_trans Adams
+#     dummy_adam = get_OF_Feat_Adam(reader)
+# elif conf_train_flag == 1: # get main Adams
+#     dummy_adam = get_main_Adam(reader)
 
 # define saver
-saver_tmp = tf.train.Saver()
+saver_tmp = tf.train.Saver(allow_empty=True)
 saver_parent = tf.train.Saver(max_to_keep=20)
 
-# initialize adam betas because of bad historical ckpt
-with tf.variable_scope('', reuse=tf.AUTO_REUSE):
-    beta1 = tf.get_variable('beta1_power', shape=[], initializer=tf.constant_initializer(0.9))
-    beta2 = tf.get_variable('beta2_power', shape=[], initializer=tf.constant_initializer(0.999))
-init_betas = tf.initializers.variables([beta1, beta2], name='init_betas')
+# # initialize adam betas because of bad historical ckpt
+# with tf.variable_scope('', reuse=tf.AUTO_REUSE):
+#     beta1 = tf.get_variable('beta1_power', shape=[], initializer=tf.constant_initializer(0.9))
+#     beta2 = tf.get_variable('beta2_power', shape=[], initializer=tf.constant_initializer(0.999))
+# init_betas = tf.initializers.variables([beta1, beta2], name='init_betas')
 
 # run the session
 with tf.Session(config=config_gpu) as sess:
@@ -122,7 +129,7 @@ with tf.Session(config=config_gpu) as sess:
     saver_tmp.restore(sess, params_model['restore_0'])
     print('restored variables from {}'.format(params_model['restore_0']))
     print('All weights initialized.')
-    sess.run(init_betas)
+    # sess.run(init_betas)
 
     print("Starting training for {0} epochs, {1} total steps.".format(epochs, total_steps))
     train_flag = conf_train_flag
