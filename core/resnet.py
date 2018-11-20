@@ -28,11 +28,12 @@ class ResNet():
         if self._data_format is not "NCHW" and self._data_format is not "NHWC":
             sys.exit("Invalid data format. Must be either 'NCHW' or 'NHWC'.")
 
-    def _build_model(self, images, atts, flow_in, train_flag):
+    def _build_model(self, images, atts, flow_in, feat_trans_in, train_flag):
         '''
         :param images: [2,H,W,3], tf.float32, img(t+1), img(t)
         :param atts: [2,H,W,1], tf.int32, att for img(t+1), img(t)
         :param flowin: [1,H,W,2], tf.float32, Flow for img(t)
+        :param feat_trans_in: [] list of transformed features, each has shape [1,H,W,C]
         :param train_flag: 0:train main, 1:train trans, 2:train all, 3:no train all
         :return: activation_map output before softmax
         '''
@@ -160,10 +161,14 @@ class ResNet():
                 main_feat_out = nn.bias_layer(self._data_format, main_feat_out, 64, train_flag)
 
         with tf.variable_scope('feat_transform'):
+            feat_flow_pairs = []
             with tf.variable_scope('B0'):
                 # feature map displacement using optical flow, original size
-                B0_trans_feat = self.flow_disp(model['B0'][1:2,:,:,:], flow_in)
+                B0_feat, B0_flow_in = self.feat_flow_warp(model['B0'][1:2,:,:,:], flow_in)
+                feat_flow_pairs.append([B0_feat, B0_flow_in])
                 # pool 1/4
+                if self._data_format == "NCHW":
+                    B0_trans_feat = tf.transpose(feat_trans_in[0], [0, 3, 1, 2])  # To NCHW
                 B0_trans_feat = nn.max_pool2d_4(self._data_format, B0_trans_feat, 4, 'SAME')
                 # conv to resize feat channels
                 shape_dict['B0_transform'] = [3, 3, 64, 256]
@@ -173,8 +178,11 @@ class ResNet():
             with tf.variable_scope('B1'):
                 # feature map displacement using optical flow, 1/2 size
                 in_flow = nn.avg_pool2d(self._data_format, flow_in, 2, 2, 'SAME')
-                B1_trans_feat = self.flow_disp(model['B1_2'][1:2, :, :, :], in_flow)
+                B1_feat, B1_flow_in = self.feat_flow_warp(model['B1_2'][1:2, :, :, :], in_flow)
+                feat_flow_pairs.append([B1_feat, B1_flow_in])
                 # pool from 1/2 to 1/4
+                if self._data_format == "NCHW":
+                    B1_trans_feat = tf.transpose(feat_trans_in[1], [0, 3, 1, 2])  # To NCHW
                 B1_trans_feat = nn.max_pool2d(self._data_format, B1_trans_feat, 2, 'SAME')
                 # conv to resize feat channels
                 shape_dict['B1_transform'] = [3, 3, 128, 256]
@@ -184,8 +192,11 @@ class ResNet():
             with tf.variable_scope('B2'):
                 # feature map displacement using optical flow, 1/4 size
                 in_flow = nn.avg_pool2d(self._data_format, flow_in, 4, 4, 'SAME')
-                B2_trans_feat = self.flow_disp(model['B2_2'][1:2, :, :, :], in_flow)
+                B2_feat, B2_flow_in = self.feat_flow_warp(model['B2_2'][1:2, :, :, :], in_flow)
+                feat_flow_pairs.append([B2_feat, B2_flow_in])
                 # no further pool needed, size 1/4, conv to resize feat channels
+                if self._data_format == "NCHW":
+                    B2_trans_feat = tf.transpose(feat_trans_in[2], [0, 3, 1, 2])  # To NCHW
                 shape_dict['B2_transform'] = [3, 3, 256, 256]
                 with tf.variable_scope('conv_resize'):
                     model['B2_trans'] = nn.conv_layer(self._data_format, B2_trans_feat, 1, 'SAME',
@@ -193,11 +204,14 @@ class ResNet():
             with tf.variable_scope('B3'):
                 # feature map displacement using optical flow, 1/8 size
                 in_flow = nn.avg_pool2d(self._data_format, flow_in, 8, 8, 'SAME')
-                B3_trans_feat = self.flow_disp(model['B3_5'][1:2, :, :, :], in_flow)
+                B3_feat, B3_flow_in = self.feat_flow_warp(model['B3_5'][1:2, :, :, :], in_flow)
+                feat_flow_pairs.append([B3_feat, B3_flow_in])
                 # resize from 1/8 to 1/4, x2
                 if self._data_format == "NCHW":
+                    B3_trans_feat = tf.transpose(feat_trans_in[3], [0, 3, 1, 2])  # To NCHW
+                if self._data_format == "NCHW":
                     B3_trans_feat = tf.transpose(B3_trans_feat, [0, 2, 3, 1])  # To NHWC
-                    B3_trans_feat = tf.image.resize_images(B3_trans_feat, [int(im_size[1]/4), int(im_size[2]/4)]) # NHWC
+                    B3_trans_feat = tf.image.resize_images(B3_trans_feat, tf.to_int32([tf.round(im_size[1]/4), tf.round(im_size[2]/4)])) # NHWC
                     B3_trans_feat = tf.transpose(B3_trans_feat, [0, 3, 1, 2])  # To NCHW
                 # conv to resize feat channels
                 shape_dict['B3_transform'] = [3, 3, 512, 256]
@@ -207,11 +221,14 @@ class ResNet():
             with tf.variable_scope('B4'):
                 # feature map displacement using optical flow, 1/16 size
                 in_flow = nn.avg_pool2d(self._data_format, flow_in, 16, 16, 'SAME')
-                B4_trans_feat = self.flow_disp(model['B4_2'][1:2, :, :, :], in_flow)
+                B4_feat, B4_flow_in = self.feat_flow_warp(model['B4_2'][1:2, :, :, :], in_flow)
+                feat_flow_pairs.append([B4_feat, B4_flow_in])
+                if self._data_format == "NCHW":
+                    B4_trans_feat = tf.transpose(feat_trans_in[4], [0, 3, 1, 2])  # To NCHW
                 # resize from 1/16 to 1/4, x4
                 if self._data_format == "NCHW":
                     B4_trans_feat = tf.transpose(B4_trans_feat, [0, 2, 3, 1])  # To NHWC
-                    B4_trans_feat = tf.image.resize_images(B4_trans_feat, [int(im_size[1]/4), int(im_size[2]/4)]) # NHWC
+                    B4_trans_feat = tf.image.resize_images(B4_trans_feat, tf.to_int32([tf.round(im_size[1]/4), tf.round(im_size[2]/4)])) # NHWC
                     B4_trans_feat = tf.transpose(B4_trans_feat, [0, 3, 1, 2])  # To NCHW
                 # conv to resize feat channels
                 shape_dict['B4_transform'] = [3, 3, 1024, 256]
@@ -227,7 +244,7 @@ class ResNet():
             with tf.variable_scope('fuse'):
                 with tf.variable_scope('conv1'):
                     fuse1_out = nn.conv_layer(self._data_format, concat_trans_feat, 1, 'SAME',
-                                              [3, 3, 1024, 512], train_flag)
+                                              [3, 3, 1280, 512], train_flag)
                     fuse1_out = nn.bias_layer(self._data_format, fuse1_out, 512, train_flag)
                     fuse1_out = nn.ReLu_layer(fuse1_out)
                 with tf.variable_scope('conv2'):
@@ -257,38 +274,21 @@ class ResNet():
             seg_out = nn.bias_layer(self._data_format, seg_out, 2, train_flag)
 
 
-        return seg_feat, seg_out
+        return seg_feat, seg_out, feat_flow_pairs
 
-    def flow_disp(self, feat_arr, flow_arr):
+    def feat_flow_warp(self, feat_arr, flow_arr):
         '''
         :param feat_arr: [1,h,w,C] or [1,C,h,w]
         :param flow_arr: [1,h,w,2] or [1,2,h,w]
-        :return: feat_arr: [1,h,w,C] or [1,C,h,w]
+        :return: feat_arr [h,w,C], flow_arr: [h,w,2]
         '''
-
         if self._data_format == "NCHW":
             feat_arr = tf.transpose(feat_arr, [0, 2, 3, 1]) # to NHWC
             feat_arr = tf.squeeze(feat_arr, 0) # to HWC
             flow_arr = tf.transpose(flow_arr, [0, 2, 3, 1]) # to NHW2
             flow_arr = tf.squeeze(flow_arr, 0) # to HW2
-        feat_shape = tf.shape(feat_arr)
-        h = feat_shape[0]
-        w = feat_shape[1]
-        new_feat = tf.zeros_like(feat_arr)
-        for idx_h in range(h):
-            for idx_w in range(w):
-                motion_h = int(round(flow_arr[idx_h][idx_w][1]))
-                motion_w = int(round(flow_arr[idx_h][idx_w][0]))
-                new_h = idx_h + motion_h
-                new_w = idx_w + motion_w
-                if new_h < h and new_h >= 0 and new_w < w and new_w >= 0:
-                    new_feat[new_h][new_w] = feat_arr[idx_h][idx_w]
-        # reshape
-        if self._data_format == "NCHW":
-            new_feat = tf.transpose(new_feat, [2, 0, 1]) # from HWC to CHW
-            new_feat = tf.expand_dims(new_feat, 0) # to NCHW where N = 1
 
-        return new_feat
+        return feat_arr, flow_arr
 
     def _att_gate(self, images, atts):
         '''
@@ -344,13 +344,14 @@ class ResNet():
 
         return loss
 
-    def train(self, feed_img, feed_seg, feed_weight, feed_att, flow_in, mask, weight, global_step, acc_count, train_flag):
+    def train(self, feed_img, feed_seg, feed_weight, feed_att, flow_in, feat_trans_in, mask, weight, global_step, acc_count, train_flag):
         '''
         :param feed_img: [2,H,W,3], tf.float32: img(t+1), img(t)
         :param feed_seg: [1,H,W,1], tf.int32: img(t+1)
         :param feed_weight: [1,H,W,1], tf.float32: img/seg(t+1)
         :param feed_att: [2,H,W,1], tf.int32: img(t+1), img(t)
         :param flow_in: [1,H,W,2], tf.float32: img(t)
+        :param feat_trans_in: [] list of transformed features, each has shape [1,H,W,C]
         :param mask: [1,H,W,1], tf.float32, mask for trans_obj and surrounding background, the size should be smaller than feed_att(t+1)
         :param weight: [1,H,W,1], tf.float32, balance weight for trans_obj
         :param global_step: keep track of global train step
@@ -358,7 +359,7 @@ class ResNet():
         :param train_flag: 0:train main, 1:train trans, 2:train all, 3:no train all
         :return: total_loss, train_step_op, grad_acc_op
         '''
-        seg_feat, seg_out = self._build_model(feed_img, feed_att, flow_in, train_flag) # [2,2,H,W] or [2,H,W,2]
+        seg_feat, seg_out, feat_trans_eval = self._build_model(feed_img, feed_att, flow_in, feat_trans_in, train_flag) # [2,2,H,W] or [2,H,W,2]
 
         # total_loss:
         #   seg_loss for img(t+1)
@@ -395,7 +396,7 @@ class ResNet():
 
         bp_step, grad_acc_op = self._optimize(total_loss, acc_count, global_step, train_flag)
 
-        return total_loss, bp_step, grad_acc_op
+        return total_loss, bp_step, grad_acc_op, feat_trans_eval
 
     def _optimize(self, loss, acc_count, global_step, train_flag):
         '''

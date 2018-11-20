@@ -225,6 +225,10 @@ def get_imgnet_var():
         imgnet_dict['main/fuse/kernel'] = tf.get_variable('kernel')
         imgnet_dict['main/fuse/bias'] = tf.get_variable('bias')
 
+    # for global_step
+    # with tf.variable_scope('', reuse=True):
+    #     imgnet_dict['global_step'] = tf.get_variable('global_step')
+
     return imgnet_dict
 
 def get_full_var():

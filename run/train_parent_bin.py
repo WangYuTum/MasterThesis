@@ -11,6 +11,7 @@ from __future__ import print_function
 
 import os,sys
 import tensorflow as tf
+import numpy as np
 sys.path.append("..")
 from dataset import DAVIS_dataset
 from core import resnet
@@ -20,6 +21,33 @@ from core.nn import get_OF_Feat_Adam
 from core.nn import get_main_Adam
 from tensorflow.python import pywrap_tensorflow
 
+def transf_slow(feat_arr, flow_arr):
+    '''
+    :param feat_arr: [h,w,c]
+    :param flow_arr: [h,w,2]
+    :return: trans_feat: [1,h,w,c]
+    '''
+    feat_shape = feat_arr.shape
+    flow_shape = flow_arr.shape
+    assert feat_shape[0] == flow_shape[0], "Feat_map/Flow shape does not match!"
+    assert feat_shape[1] == flow_shape[1], "Feat_map/Flow shape does not match!"
+    h = feat_shape[0]
+    w = feat_shape[1]
+    c = feat_shape[2]
+    new_feat = np.zeros((h, w, c), np.float32)
+    for idx_h in range(h):
+        for idx_w in range(w):
+            motion_h = int(round(flow_arr[idx_h][idx_w][1]))
+            motion_w = int(round(flow_arr[idx_h][idx_w][0]))
+            new_h = idx_h + motion_h
+            new_w = idx_w + motion_w
+            if new_h < h and new_h >= 0 and new_w < w and new_w >= 0:
+                    new_feat[new_h][new_w] = feat_arr[idx_h][idx_w]
+
+    new_feat = new_feat[np.newaxis, :]
+
+    return new_feat
+
 # parse argument
 # conf_train_flag = int(sys.argv[1]) # 0 for main, 1 for OF/Feat_trans
 # conf_epochs = int(sys.argv[2]) # 2 for main, 5 for OF/Feat_trans
@@ -28,15 +56,15 @@ from tensorflow.python import pywrap_tensorflow
 # conf_restore_ckpt = str(sys.argv[5]) # only change the suffix of saved ckpt file
 # conf_l2 = float(sys.argv[6]) # 0.0005 for main, 0.0002 for OF/Feat_trans
 # conf_tsboard_save = str(sys.argv[7])
-conf_train_flag = 0
-conf_epochs = 2
-conf_lr = 5e-6
-conf_save_ckpt_interval = 1200
+conf_train_flag = 1
+conf_epochs = 5
+conf_lr = 5e-5
+conf_save_ckpt_interval = 3000
 conf_l2 = 0.0002
-conf_tsboard_save = 'iter_0_main'
+conf_tsboard_save = 'iter_1_OF'
 
 # config device
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 config_gpu = tf.ConfigProto()
 config_gpu.gpu_options.allow_growth = True
 
@@ -54,10 +82,10 @@ params_model = {
     'l2_weight': conf_l2,
     'init_lr': conf_lr,
     'data_format': 'NCHW', # optimal for cudnn
-    'save_path': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large_Flowside/iter0_manul/att_bin.ckpt',
+    'save_path': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large_Flowside/iter1_manul/att_bin.ckpt',
     'tsboard_logs': '../data/tsboard_logs/attention_bin/CNN-part-gate-img-v4_large_Flowside/'+conf_tsboard_save,
     # 'restore_0': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large_Flowside/'+conf_restore_ckpt,
-    'restore_0': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large_Flowin/att_bin.ckpt-24000',
+    'restore_0': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large_Flowside/iter0_manul/att_bin.ckpt-1200',
     'restore_parent_bin': '../data/ckpts/xxx.ckpt'
 }
 # define epochs
@@ -79,9 +107,13 @@ feed_seg = tf.placeholder(tf.int32, (params_model['batch'], None, None, 1)) # im
 feed_weight = tf.placeholder(tf.float32, (params_model['batch'], None, None, 1)) # img/seg(t+1)
 feed_att = tf.placeholder(tf.int32, (params_model['batch']+1, None, None, 1)) # img(t+1), img(t)
 feed_flow = tf.placeholder(tf.float32, (params_model['batch'], None, None, 2)) # img(t)
+feed_feat_flow_trans = []
+for i in range(5):
+    feed_feat_flow_trans.append(tf.placeholder(tf.float32, name="feat_trans_"+str(i)))
 feed_mask = tf.placeholder(tf.float32, (params_model['batch'], None, None, 1)) # mask for trans_obj and surrounding background, smaller than att(t+1)
 feed_mask_w = tf.placeholder(tf.float32, (params_model['batch'], None, None, 1)) # balance weight for trans_obj
 feed_train_flag = tf.placeholder(tf.int32, ([])) # train_flag: 0,1,2,3
+
 
 # display
 sum_img1 = tf.summary.image('img_t1', feed_img[0:1,:,:,:])
@@ -96,22 +128,21 @@ sum_mask_w = tf.summary.image('mask_w', tf.cast(feed_mask_w, tf.float16))
 
 # build network, on GPU by default
 model = resnet.ResNet(params_model)
-loss, bp_step, grad_acc_op = model.train(feed_img, feed_seg, feed_weight, feed_att, feed_flow, feed_mask,
+loss, bp_step, grad_acc_op, feat_trans_eval = model.train(feed_img, feed_seg, feed_weight, feed_att, feed_flow, feed_feat_flow_trans, feed_mask,
                                          feed_mask_w, global_step, acc_count, conf_train_flag)
-init_op = tf.global_variables_initializer()
 sum_all = tf.summary.merge_all()
-
 sum_train_flag = tf.summary.scalar('train_flag', feed_train_flag)
 
 
-# reader = pywrap_tensorflow.NewCheckpointReader(params_model['restore_0'])
-# if conf_train_flag == 0: # get OF/Feat_trans Adams
-#     dummy_adam = get_OF_Feat_Adam(reader)
-# elif conf_train_flag == 1: # get main Adams
-#     dummy_adam = get_main_Adam(reader)
+reader = pywrap_tensorflow.NewCheckpointReader(params_model['restore_0'])
+if conf_train_flag == 0: # get OF/Feat_trans Adams
+    dummy_adam = get_OF_Feat_Adam(reader)
+elif conf_train_flag == 1: # get main Adams
+    dummy_adam = get_main_Adam(reader)
+init_op = tf.global_variables_initializer()
 
 # define saver
-saver_tmp = tf.train.Saver(allow_empty=True)
+saver_tmp = tf.train.Saver(get_imgnet_var())
 saver_parent = tf.train.Saver(max_to_keep=20)
 
 # # initialize adam betas because of bad historical ckpt
@@ -123,7 +154,10 @@ saver_parent = tf.train.Saver(max_to_keep=20)
 # run the session
 with tf.Session(config=config_gpu) as sess:
     sum_writer = tf.summary.FileWriter(params_model['tsboard_logs'], sess.graph)
-    sess.run(init_op)
+    img, seg, weight, att, flow, mask, mask_w = mydata.get_a_random_sample()
+    feed_dict_v = {feed_img: img, feed_seg: seg, feed_weight: weight, feed_att: att,
+                   feed_flow: flow, feed_mask: mask, feed_mask_w: mask_w}
+    sess.run(init_op, feed_dict=feed_dict_v)
 
     # restore selected/all variables
     saver_tmp.restore(sess, params_model['restore_0'])
@@ -150,8 +184,20 @@ with tf.Session(config=config_gpu) as sess:
                 if train_flag == 0:
                     run_result = sess.run([loss, sum_all] + grad_acc_op[0] + grad_acc_op[2], feed_dict=feed_dict_v)
                 elif train_flag == 1:
+                    feat_trans_pairs = sess.run(feat_trans_eval, feed_dict=feed_dict_v) # a list of np.arrays [HWC, HW2]
+                    feat_transformed_dict = {}
+                    for i in range(5):
+                        ele = feat_trans_pairs[i]
+                        feat_transformed_dict.update({feed_feat_flow_trans[i]: transf_slow(ele[0], ele[1])})
+                    feed_dict_v.update(feat_transformed_dict)
                     run_result = sess.run([loss, sum_all] + grad_acc_op[1]+ grad_acc_op[2], feed_dict=feed_dict_v)
                 elif train_flag == 2:
+                    feat_trans_pairs = sess.run(feat_trans_eval, feed_dict=feed_dict_v)
+                    feat_transformed_dict = {}
+                    for i in range(5):
+                        ele = feat_trans_pairs[i]
+                        feat_transformed_dict.update({feed_feat_flow_trans[i]: transf_slow(ele[0], ele[1])})
+                    feed_dict_v.update(feat_transformed_dict)
                     run_result = sess.run([loss, sum_all] + grad_acc_op[0] + grad_acc_op[1] + grad_acc_op[2],
                                           feed_dict=feed_dict_v)
                 loss_ = run_result[0]
@@ -177,4 +223,3 @@ with tf.Session(config=config_gpu) as sess:
                       global_step=global_step,
                       write_meta_graph=False)
     print('Saved checkpoint on global_step {0}'.format(global_step.eval()))
-

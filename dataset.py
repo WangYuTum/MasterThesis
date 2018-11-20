@@ -189,8 +189,10 @@ class DAVIS_dataset():
         img_H = int(np.shape(img1)[0] / 2)
         img_W = int(np.shape(img1)[1] / 2)
         scale = get_scale()
-        new_H = int(img_H * scale)
-        new_W = int(img_W * scale)
+        # new_H = int(img_H * scale)
+        # new_W = int(img_W * scale)
+        new_H = 240
+        new_W = 427
 
         img_obj1 = Image.fromarray(stacked[:, :, 0:3], mode='RGB')
         img_obj1 = img_obj1.resize((new_W, new_H), Image.BILINEAR)
