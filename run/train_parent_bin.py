@@ -49,19 +49,19 @@ def transf_slow(feat_arr, flow_arr):
     return new_feat
 
 # parse argument
-# conf_train_flag = int(sys.argv[1]) # 0 for main, 1 for OF/Feat_trans
-# conf_epochs = int(sys.argv[2]) # 2 for main, 5 for OF/Feat_trans
-# conf_lr = float(sys.argv[3]) # 1e-5 for main, 5e-5 for OF/Feat_trans
-# conf_save_ckpt_interval = int(sys.argv[4]) # 1200(2ep) for main, 3000(5ep) for OF/Feat_trans
-# conf_restore_ckpt = str(sys.argv[5]) # only change the suffix of saved ckpt file
-# conf_l2 = float(sys.argv[6]) # 0.0005 for main, 0.0002 for OF/Feat_trans
-# conf_tsboard_save = str(sys.argv[7])
-conf_train_flag = 1
-conf_epochs = 5
-conf_lr = 5e-5
-conf_save_ckpt_interval = 3000
-conf_l2 = 0.0002
-conf_tsboard_save = 'iter_1_OF'
+conf_train_flag = int(sys.argv[1]) # 0 for main, 1 for OF/Feat_trans
+conf_epochs = int(sys.argv[2]) # 2 for main, 5 for OF/Feat_trans
+conf_lr = float(sys.argv[3]) # 1e-5 for main, 5e-5 for OF/Feat_trans
+conf_save_ckpt_interval = int(sys.argv[4]) # 1200(2ep) for main, 3000(5ep) for OF/Feat_trans
+conf_restore_ckpt = str(sys.argv[5]) # only change the suffix of saved ckpt file
+conf_l2 = float(sys.argv[6]) # 0.0005 for main, 0.0002 for OF/Feat_trans
+conf_tsboard_save = str(sys.argv[7])
+# conf_train_flag = 1
+# conf_epochs = 5
+# conf_lr = 5e-5
+# conf_save_ckpt_interval = 3000
+# conf_l2 = 0.0002
+# conf_tsboard_save = 'iter_1_OF'
 
 # config device
 os.environ['CUDA_VISIBLE_DEVICES'] = '1'
@@ -82,10 +82,10 @@ params_model = {
     'l2_weight': conf_l2,
     'init_lr': conf_lr,
     'data_format': 'NCHW', # optimal for cudnn
-    'save_path': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large_Flowside/iter1_manul/att_bin.ckpt',
+    'save_path': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large_Flowside/att_bin.ckpt',
     'tsboard_logs': '../data/tsboard_logs/attention_bin/CNN-part-gate-img-v4_large_Flowside/'+conf_tsboard_save,
-    # 'restore_0': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large_Flowside/'+conf_restore_ckpt,
-    'restore_0': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large_Flowside/iter0_manul/att_bin.ckpt-1200',
+    'restore_0': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large_Flowside/'+conf_restore_ckpt,
+    #'restore_0': '../data/ckpts/attention_bin/CNN-part-gate-img-v4_large_Flowside/iter0_manul/att_bin.ckpt-1200',
     'restore_parent_bin': '../data/ckpts/xxx.ckpt'
 }
 # define epochs
@@ -142,8 +142,9 @@ elif conf_train_flag == 1: # get main Adams
 init_op = tf.global_variables_initializer()
 
 # define saver
-saver_tmp = tf.train.Saver(get_imgnet_var())
-saver_parent = tf.train.Saver(max_to_keep=20)
+# saver_tmp = tf.train.Saver(get_imgnet_var())
+saver_tmp = tf.train.Saver(allow_empty=True)
+saver_parent = tf.train.Saver(max_to_keep=50)
 
 # # initialize adam betas because of bad historical ckpt
 # with tf.variable_scope('', reuse=tf.AUTO_REUSE):
@@ -180,24 +181,20 @@ with tf.Session(config=config_gpu) as sess:
                 train_flag_dict = {feed_train_flag: train_flag}
                 sum_flag_ = sess.run(sum_train_flag, feed_dict=train_flag_dict)
                 sum_writer.add_summary(sum_flag_, global_step.eval())
+
                 # forward
+                feat_trans_pairs = sess.run(feat_trans_eval, feed_dict=feed_dict_v)  # a list of np.arrays [HWC, HW2]
+                feat_transformed_dict = {}
+                for i in range(5):
+                    ele = feat_trans_pairs[i]
+                    feat_transformed_dict.update({feed_feat_flow_trans[i]: transf_slow(ele[0], ele[1])})
+                feed_dict_v.update(feat_transformed_dict)
+
                 if train_flag == 0:
                     run_result = sess.run([loss, sum_all] + grad_acc_op[0] + grad_acc_op[2], feed_dict=feed_dict_v)
                 elif train_flag == 1:
-                    feat_trans_pairs = sess.run(feat_trans_eval, feed_dict=feed_dict_v) # a list of np.arrays [HWC, HW2]
-                    feat_transformed_dict = {}
-                    for i in range(5):
-                        ele = feat_trans_pairs[i]
-                        feat_transformed_dict.update({feed_feat_flow_trans[i]: transf_slow(ele[0], ele[1])})
-                    feed_dict_v.update(feat_transformed_dict)
                     run_result = sess.run([loss, sum_all] + grad_acc_op[1]+ grad_acc_op[2], feed_dict=feed_dict_v)
                 elif train_flag == 2:
-                    feat_trans_pairs = sess.run(feat_trans_eval, feed_dict=feed_dict_v)
-                    feat_transformed_dict = {}
-                    for i in range(5):
-                        ele = feat_trans_pairs[i]
-                        feat_transformed_dict.update({feed_feat_flow_trans[i]: transf_slow(ele[0], ele[1])})
-                    feed_dict_v.update(feat_transformed_dict)
                     run_result = sess.run([loss, sum_all] + grad_acc_op[0] + grad_acc_op[1] + grad_acc_op[2],
                                           feed_dict=feed_dict_v)
                 loss_ = run_result[0]

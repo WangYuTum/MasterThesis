@@ -444,59 +444,43 @@ def get_main_Adam(reader_main):
 def get_OF_Feat_Adam(reader_OF):
 
     all_adams = []
-    OF_dict = {}
+    OF_trans = {}
     for i in range(5):
-        for conv_id in range(2):
-            adam_name = 'optical_flow/B' + str(i) + '/conv' + str(conv_id + 1) + '/kernel/Adam'
-            adam1_name = 'optical_flow/B' + str(i) + '/conv' + str(conv_id + 1) + '/kernel/Adam_1'
-            tmp_adam = get_Adam(reader_OF, adam_name)
-            tmp_adam1 = get_Adam(reader_OF, adam1_name)
-            OF_dict[adam_name] = tf.Variable(tmp_adam, name=adam_name)
-            OF_dict[adam1_name] = tf.Variable(tmp_adam1, name=adam1_name)
-    all_adams.append(OF_dict)
+        adam_name = 'feat_transform/B' + str(i) + '/conv_resize' + '/kernel/Adam'
+        adam1_name = 'feat_transform/B' + str(i) + '/conv_resize' + '/kernel/Adam_1'
+        tmp_adam = get_Adam(reader_OF, adam_name)
+        tmp_adam1 = get_Adam(reader_OF, adam1_name)
+        OF_trans[adam_name] = tf.Variable(tmp_adam, name=adam_name)
+        OF_trans[adam1_name] = tf.Variable(tmp_adam1, name=adam1_name)
+    all_adams.append(OF_trans)
 
-    Feat_dict = {}
-    for i in range(5):
-        if i != 4:
-            num_convs = i + 1
-        else:
-            num_convs = 4
-        for conv_id in range(num_convs):
-            adam_name = 'feat_transform/B'+str(i)+'/conv'+str(conv_id+1)+'/kernel/Adam'
-            adam1_name = 'feat_transform/B'+str(i)+'/conv'+str(conv_id+1)+'/kernel/Adam_1'
-            tmp_adam = get_Adam(reader_OF, adam_name)
-            tmp_adam1 = get_Adam(reader_OF, adam1_name)
-            Feat_dict[adam_name] = tf.Variable(tmp_adam, name=adam_name)
-            Feat_dict[adam1_name] = tf.Variable(tmp_adam1, name=adam1_name)
-    all_adams.append(Feat_dict)
-
-    Feat_sides_dict = {}
-    for i in range(5):
-        adam_kernel_name = 'feat_transform/B' + str(i) + '_trans_side_path/kernel/Adam'
-        adam1_kernel_name = 'feat_transform/B' + str(i) + '_trans_side_path/kernel/Adam_1'
-        adam_bias_name = 'feat_transform/B' + str(i) + '_trans_side_path/bias/Adam'
-        adam1_bias_name = 'feat_transform/B' + str(i) + '_trans_side_path/bias/Adam_1'
+    OF_trans_fuse = {}
+    for i in range(3):
+        adam_kernel_name = 'feat_transform/fuse/conv' + str(i+1) + '/kernel/Adam'
+        adam1_kernel_name = 'feat_transform/fuse/conv' + str(i+1) + '/kernel/Adam_1'
+        adam_bias_name = 'feat_transform/fuse/conv' + str(i+1) + '/bias/Adam'
+        adam1_bias_name = 'feat_transform/fuse/conv' + str(i+1) + '/bias/Adam_1'
         tmp_kernel_adam = get_Adam(reader_OF, adam_kernel_name)
         tmp_kernel_adam1 = get_Adam(reader_OF, adam1_kernel_name)
         tmp_b_adam = get_Adam(reader_OF, adam_bias_name)
         tmp_b_adam1 = get_Adam(reader_OF, adam1_bias_name)
-        Feat_sides_dict[adam_kernel_name] = tf.Variable(tmp_kernel_adam, name=adam_kernel_name)
-        Feat_sides_dict[adam1_kernel_name] = tf.Variable(tmp_kernel_adam1, name=adam1_kernel_name)
-        Feat_sides_dict[adam_bias_name] = tf.Variable(tmp_b_adam, name=adam_bias_name)
-        Feat_sides_dict[adam1_bias_name] = tf.Variable(tmp_b_adam1, name=adam1_bias_name)
-    all_adams.append(Feat_sides_dict)
+        OF_trans_fuse[adam_kernel_name] = tf.Variable(tmp_kernel_adam, name=adam_kernel_name)
+        OF_trans_fuse[adam1_kernel_name] = tf.Variable(tmp_kernel_adam1, name=adam1_kernel_name)
+        OF_trans_fuse[adam_bias_name] = tf.Variable(tmp_b_adam, name=adam_bias_name)
+        OF_trans_fuse[adam1_bias_name] = tf.Variable(tmp_b_adam1, name=adam1_bias_name)
+    all_adams.append(OF_trans_fuse)
 
-    feat_fuse_f_adam = get_Adam(reader_OF, 'feat_transform/fuse/kernel/Adam')
-    feat_fuse_f_adam1 = get_Adam(reader_OF, 'feat_transform/fuse/kernel/Adam_1')
-    feat_fuse_adam_f_var = tf.Variable(feat_fuse_f_adam, name='feat_transform/fuse/kernel/Adam')
-    feat_fuse_adam1_f_var = tf.Variable(feat_fuse_f_adam1, name='feat_transform/fuse/kernel/Adam_1')
+    feat_fuse_f_adam = get_Adam(reader_OF, 'feat_transform/fuse/fuse_trans/kernel/Adam')
+    feat_fuse_f_adam1 = get_Adam(reader_OF, 'feat_transform/fuse/fuse_trans/kernel/Adam_1')
+    feat_fuse_adam_f_var = tf.Variable(feat_fuse_f_adam, name='feat_transform/fuse/fuse_trans/kernel/Adam')
+    feat_fuse_adam1_f_var = tf.Variable(feat_fuse_f_adam1, name='feat_transform/fuse/fuse_trans/kernel/Adam_1')
     all_adams.append(feat_fuse_adam_f_var)
     all_adams.append(feat_fuse_adam1_f_var)
 
-    feat_fuse_b_adam = get_Adam(reader_OF, 'feat_transform/fuse/bias/Adam')
-    feat_fuse_b_adam1 = get_Adam(reader_OF, 'feat_transform/fuse/bias/Adam_1')
-    feat_fuse_adam_b_var = tf.Variable(feat_fuse_b_adam, name='feat_transform/fuse/bias/Adam')
-    feat_fuse_adam1_b_var = tf.Variable(feat_fuse_b_adam1, name='feat_transform/fuse/bias/Adam_1')
+    feat_fuse_b_adam = get_Adam(reader_OF, 'feat_transform/fuse/fuse_trans/bias/Adam')
+    feat_fuse_b_adam1 = get_Adam(reader_OF, 'feat_transform/fuse/fuse_trans/bias/Adam_1')
+    feat_fuse_adam_b_var = tf.Variable(feat_fuse_b_adam, name='feat_transform/fuse/fuse_trans/bias/Adam')
+    feat_fuse_adam1_b_var = tf.Variable(feat_fuse_b_adam1, name='feat_transform/fuse/fuse_trans/bias/Adam_1')
     all_adams.append(feat_fuse_adam_b_var)
     all_adams.append(feat_fuse_adam1_b_var)
 
