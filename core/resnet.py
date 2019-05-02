@@ -9,7 +9,7 @@ from __future__ import print_function
 
 import tensorflow as tf
 
-import nn
+from core import nn
 import sys
 
 class ResNet():
