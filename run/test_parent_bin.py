@@ -196,8 +196,8 @@ with tf.Session(config=config_gpu) as sess:
     pre_bboxes_list = []
     for i in range(np.shape(pre_bboxes_arr)[0]):
         pre_bboxes_list.append(pre_bboxes_arr[i].tolist())
-    if len(part_list) != np.shape(pre_bboxes_arr)[0]:
-        raise ValueError('part list {} != num_bbox {}'.format(len(part_list), np.shape(pre_bboxes_arr)[0]))
+    #if len(part_list) != np.shape(pre_bboxes_arr)[0]:
+    #    raise ValueError('part list {} != num_bbox {}'.format(len(part_list), np.shape(pre_bboxes_arr)[0]))
 
     new_valid_indices = []
     sum_seg = np.sum(np.multiply(original_att_mask.astype(np.int32), final_seg.astype(np.int32)))
@@ -209,12 +209,12 @@ with tf.Session(config=config_gpu) as sess:
         valid_indices_arr = np.array(new_valid_indices)
     else:
         print('Number of valid bboxes before: {}'.format(len(valid_indices)))
-        for i in range(len(part_list)):
+        for i in range(np.shape(pre_bboxes_arr)[0]):
             # only check those are already valid bbox_mask
             if i in valid_indices:
                 box = pre_bboxes_list[i]
-                mask_path = part_list[i]
-                # bool_val = is_valid_bbox_mask(seg_arr=final_seg.astype(np.uint8), bbox=box, mask_path=mask_path)
+                #mask_path = part_list[i]
+                #bool_val = is_valid_bbox_mask(seg_arr=final_seg.astype(np.uint8), bbox=box, mask_path=mask_path)
                 bool_val = is_valid_bbox(seg_arr=final_seg.astype(np.uint8), bbox=box)
                 # if the bbox_mask is valid
                 if bool_val:
@@ -231,7 +231,7 @@ with tf.Session(config=config_gpu) as sess:
         os.mkdir(result_parts_color)
     box_colors = gen_box_colors()
     plot_bbox_list = []
-    for i in range(len(part_list)):
+    for i in range(np.shape(pre_bboxes_arr)[0]):
         if i in new_valid_indices:
             plot_bbox_list.append(pre_bboxes_list[i])
     draw_mul_bbox_mask(img_arr=np.array(rgb_obj),
